@@ -1,0 +1,13 @@
+[project]
+name = "printq-kiosk-agent"
+version = "0.1.0"
+description = "PrintQ Self-Service Kiosk Hardware Agent"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "requests>=2.28.0",
+    "python-dotenv>=1.0.0"
+]
+
+[tool.vercel]
+entrypoint = "agent.py"
