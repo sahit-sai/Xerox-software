@@ -1,0 +1,184 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter+Tight:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-base: #EEF1F5;
+  --ink: #0E1116;
+  --ink-2: #4A5261;
+  --ink-3: #8A92A0;
+  --accent: #0E1116;
+  --signal-cyan: #0091CF;
+  --success: #12805C;
+  --warning: #B5630A;
+  --error: #C8102E;
+
+  --font-sans: 'Inter Tight', -apple-system, 'Helvetica Neue', Arial, sans-serif;
+}
+
+.dark {
+  --bg-base: #0B0D11;
+  --ink: #F2F4F7;
+  --ink-2: #98A2B3;
+  --ink-3: #667085;
+  --accent: #F2F4F7;
+  --signal-cyan: #00A3E0;
+  --success: #12B76A;
+  --warning: #F79009;
+  --error: #F04438;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--bg-base);
+  color: var(--ink);
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Tabular numbers for all monetary figures & counts */
+.tabular-nums, .num-tabular {
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Swiss Glassmorphism Surface Tokens */
+.glass-1 {
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 20px 60px rgba(14, 17, 22, 0.08);
+}
+
+.dark .glass-1 {
+  background: rgba(18, 22, 29, 0.65);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 20px 60px rgba(0, 0, 0, 0.4);
+}
+
+.glass-2 {
+  background: rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(14, 17, 22, 0.08);
+}
+
+.dark .glass-2 {
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* CMYK Ambient Drifting Blobs Background */
+@keyframes blob-drift-1 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(60px, 40px) scale(1.1); }
+}
+
+@keyframes blob-drift-2 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(-50px, -30px) scale(1.08); }
+}
+
+@keyframes blob-drift-3 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(40px, -50px) scale(0.95); }
+}
+
+.cmyk-blob-cyan {
+  position: absolute;
+  top: -10%;
+  left: -5%;
+  width: 650px;
+  height: 650px;
+  background: radial-gradient(circle, rgba(0, 163, 224, 0.18) 0%, rgba(0, 163, 224, 0) 70%);
+  border-radius: 50%;
+  filter: blur(80px);
+  animation: blob-drift-1 60s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.cmyk-blob-magenta {
+  position: absolute;
+  bottom: -15%;
+  right: -5%;
+  width: 700px;
+  height: 700px;
+  background: radial-gradient(circle, rgba(230, 0, 126, 0.12) 0%, rgba(230, 0, 126, 0) 70%);
+  border-radius: 50%;
+  filter: blur(90px);
+  animation: blob-drift-2 60s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.cmyk-blob-yellow {
+  position: absolute;
+  top: 35%;
+  right: 25%;
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, rgba(255, 212, 0, 0.14) 0%, rgba(255, 212, 0, 0) 70%);
+  border-radius: 50%;
+  filter: blur(80px);
+  animation: blob-drift-3 60s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cmyk-blob-cyan, .cmyk-blob-magenta, .cmyk-blob-yellow {
+    animation: none;
+  }
+}
+
+/* Swiss Kiosk Typography Hierarchy */
+.text-kiosk-display {
+  font-size: 120px;
+  line-height: 0.95;
+  letter-spacing: -0.04em;
+  font-weight: 800;
+}
+
+.text-kiosk-h1 {
+  font-size: 64px;
+  line-height: 1.0;
+  letter-spacing: -0.03em;
+  font-weight: 700;
+}
+
+.text-kiosk-h2 {
+  font-size: 40px;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  font-weight: 600;
+}
+
+.text-kiosk-body {
+  font-size: 26px;
+  line-height: 1.4;
+  font-weight: 400;
+}
+
+.text-kiosk-label {
+  font-size: 20px;
+  line-height: 1.3;
+  font-weight: 500;
+}
+
+.text-kiosk-small {
+  font-size: 18px;
+  line-height: 1.3;
+  font-weight: 400;
+}
+
+/* Interactive Feedback */
+.touch-active:active {
+  transform: scale(0.98);
+  transition: transform 80ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}

@@ -1,0 +1,27 @@
+# Node dependencies
+node_modules/
+.pnpm-store/
+
+# Next.js build outputs
+apps/web/.next/
+apps/web/out/
+apps/web/build/
+
+# Python / Virtual Environment
+apps/kiosk-agent/__pycache__/
+apps/kiosk-agent/*.pyc
+apps/kiosk-agent/venv/
+apps/kiosk-agent/.venv/
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# OS / Editor files
+.DS_Store
+*.pem
+.idea/
+.vscode/

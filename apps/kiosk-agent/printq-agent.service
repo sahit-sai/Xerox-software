@@ -1,0 +1,15 @@
+[Unit]
+Description=PrintQ Self-Service Kiosk Agent
+After=network.target cups.service
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/printq/apps/kiosk-agent
+ExecStart=/home/pi/printq/apps/kiosk-agent/venv/bin/python agent.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
