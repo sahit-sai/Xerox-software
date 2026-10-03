@@ -4,6 +4,19 @@ import { countDocumentPages } from '@/lib/pdf';
 import { updateSessionFile } from '@/lib/session';
 import crypto from 'crypto';
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+};
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: corsHeaders,
+  });
+}
+
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
@@ -11,28 +24,37 @@ export async function POST(req: NextRequest) {
     const token = formData.get('token') as string | null || req.cookies.get('printq_session_token')?.value;
 
     if (!file) {
-      return NextResponse.json({ error: 'No file provided' }, { status: 400 });
+      return NextResponse.json({ error: 'No file provided' }, { status: 400, headers: corsHeaders });
     }
 
     if (file.size > 25 * 1024 * 1024) {
-      return NextResponse.json({ error: 'File size exceeds 25 MB limit' }, { status: 400 });
+      return NextResponse.json({ error: 'File size exceeds 25 MB limit' }, { status: 400, headers: corsHeaders });
     }
 
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    const totalPages = await countDocumentPages(buffer, file.type || 'application/pdf');
+    let totalPages = 1;
+    let buffer: Buffer | null = null;
+
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      buffer = Buffer.from(arrayBuffer);
+      totalPages = await countDocumentPages(buffer, file.type || 'application/pdf');
+    } catch (parseErr) {
+      console.warn('Document page count parse warning, defaulting to 1:', parseErr);
+    }
 
     // Save file to storage
     const fileExt = file.name.split('.').pop() || 'pdf';
     const filePath = `sessions/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
 
-    try {
-      await supabaseAdmin.storage.from('print-files').upload(filePath, buffer, {
-        contentType: file.type,
-        upsert: true,
-      });
-    } catch (e) {
-      console.warn('Storage upload warning:', e);
+    if (buffer) {
+      try {
+        await supabaseAdmin.storage.from('print-files').upload(filePath, buffer, {
+          contentType: file.type,
+          upsert: true,
+        });
+      } catch (e) {
+        console.warn('Storage upload bypass warning:', e);
+      }
     }
 
     const fileDetails = {
@@ -58,12 +80,15 @@ export async function POST(req: NextRequest) {
       } catch (err) {}
     }
 
-    return NextResponse.json({
-      success: true,
-      file: fileDetails,
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        file: fileDetails,
+      },
+      { headers: corsHeaders }
+    );
   } catch (error: any) {
     console.error('Session upload error:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Failed to upload document' }, { status: 500, headers: corsHeaders });
   }
 }
