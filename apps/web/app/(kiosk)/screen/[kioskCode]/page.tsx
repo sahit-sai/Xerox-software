@@ -51,7 +51,13 @@ export default function TouchscreenKioskPage() {
   // Session & Job State
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessionState, setSessionState] = useState<SessionState>('idle');
-  const [uploadedFile, setUploadedFile] = useState<{ name: string; pages: number } | null>(null);
+  const [uploadedFile, setUploadedFile] = useState<{
+    name: string;
+    pages: number;
+    size?: number;
+    type?: string;
+    previewUrl?: string;
+  } | null>(null);
 
   // Print Options State (Screen 4)
   const [copies, setCopies] = useState<number>(1);
@@ -108,6 +114,26 @@ export default function TouchscreenKioskPage() {
     }
   };
 
+  // Reset state & create a new session once printing completes
+  const resetAndStartNewSession = () => {
+    setUploadedFile(null);
+    setCopies(1);
+    setColour(false);
+    setDoubleSided(false);
+    setOrientation('portrait');
+    setPageRangeMode('all');
+    setCustomRange('');
+    setPrintedPages(1);
+    setPaymentSuccess(false);
+    setPrintError(false);
+    setPhoneConnected(false);
+    setSessionId(null);
+    setRawToken('');
+    setQrDataUrl('');
+    setCurrentScreen(1);
+    initSession();
+  };
+
   // Screen 2 Countdown timer (90s lifetime)
   useEffect(() => {
     if (currentScreen !== 2) return;
@@ -138,6 +164,9 @@ export default function TouchscreenKioskPage() {
             setUploadedFile({
               name: data.session.file.name,
               pages: data.session.file.pages || 1,
+              size: data.session.file.size,
+              type: data.session.file.type,
+              previewUrl: data.session.file.previewUrl,
             });
             setCurrentScreen(3); // Auto-advance to Preview Screen on real file upload!
           }
@@ -147,7 +176,6 @@ export default function TouchscreenKioskPage() {
 
     return () => clearInterval(pollInterval);
   }, [currentScreen, rawToken]);
-
 
   // Screen 7 Printing animation loop
   useEffect(() => {
@@ -175,11 +203,11 @@ export default function TouchscreenKioskPage() {
     return () => clearTimeout(timer);
   }, [currentScreen]);
 
-  // Screen 9 Thank You auto-return
+  // Screen 9 Thank You auto-return (Creates fresh session for next user)
   useEffect(() => {
     if (currentScreen !== 9) return;
     const timer = setTimeout(() => {
-      setCurrentScreen(1);
+      resetAndStartNewSession();
     }, 5000);
     return () => clearTimeout(timer);
   }, [currentScreen]);
@@ -332,22 +360,80 @@ export default function TouchscreenKioskPage() {
               <div className="space-y-8">
                 <div className="flex justify-between items-end border-b border-ink/10 pb-6">
                   <div className="space-y-1 max-w-3xl">
-                    <span className="text-kiosk-label font-semibold text-ink2">Document Received</span>
+                    <span className="text-kiosk-label font-semibold text-signalCyan flex items-center gap-2">
+                      <CheckCircle2 className="w-5 h-5 text-success" /> Document Received from Phone
+                    </span>
                     <h1 className="text-kiosk-h1 font-bold text-ink truncate">{uploadedFile.name}</h1>
                   </div>
-                  <span className="text-kiosk-h2 font-bold text-ink tabular-nums">{uploadedFile.pages} pages</span>
+                  <div className="text-right">
+                    <span className="text-kiosk-h2 font-bold text-ink tabular-nums">{uploadedFile.pages} pages</span>
+                    {uploadedFile.size && (
+                      <span className="text-kiosk-small font-mono text-ink3 block">
+                        {(uploadedFile.size / (1024 * 1024)).toFixed(2)} MB
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <GlassPanel className="p-8">
-                  <div className="grid grid-cols-4 gap-6 max-h-[420px] overflow-y-auto pr-2">
-                    {Array.from({ length: Math.min(8, uploadedFile.pages) }).map((_, idx) => (
-                      <PageThumbnail
-                        key={idx}
-                        pageNumber={idx + 1}
-                        totalPages={uploadedFile.pages}
-                        isSelected={idx === 0}
-                      />
-                    ))}
+                  <div className="grid grid-cols-12 gap-8 items-center">
+                    {/* Featured Document Preview Canvas */}
+                    <div className="col-span-5 flex justify-center">
+                      <div className="w-full max-w-[280px] aspect-[1/1.4] bg-white rounded-control shadow-2xl border border-ink/15 p-6 flex flex-col justify-between relative overflow-hidden group">
+                        {uploadedFile.previewUrl ? (
+                          <img
+                            src={uploadedFile.previewUrl}
+                            alt={uploadedFile.name}
+                            className="w-full h-full object-contain rounded-sm"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex flex-col justify-between py-2 text-ink">
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between border-b border-ink/10 pb-2">
+                                <span className="text-[11px] font-black tracking-wider text-ink uppercase truncate">
+                                  {uploadedFile.name}
+                                </span>
+                                <span className="text-[9px] bg-ink/10 px-2 py-0.5 rounded text-ink font-bold">
+                                  {uploadedFile.type?.includes('image') ? 'IMAGE' : 'PDF'}
+                                </span>
+                              </div>
+                              <div className="w-3/4 h-2.5 bg-ink/25 rounded-pill" />
+                              <div className="w-full h-2 bg-ink/10 rounded-pill" />
+                              <div className="w-5/6 h-2 bg-ink/10 rounded-pill" />
+                              <div className="w-4/5 h-2 bg-ink/10 rounded-pill" />
+                              <div className="w-11/12 h-2 bg-ink/10 rounded-pill" />
+                            </div>
+
+                            <div className="my-auto py-4 text-center">
+                              <FileText className="w-16 h-16 text-signalCyan mx-auto opacity-80" />
+                              <p className="text-[12px] font-bold text-ink2 mt-2">Ready to Print</p>
+                            </div>
+
+                            <div className="space-y-2 pt-2 border-t border-ink/10">
+                              <div className="w-full h-2 bg-ink/10 rounded-pill" />
+                              <div className="w-2/3 h-2 bg-ink/10 rounded-pill" />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Page Thumbnail Grid */}
+                    <div className="col-span-7 space-y-4">
+                      <span className="text-kiosk-label font-bold text-ink block">Page Thumbnails ({uploadedFile.pages})</span>
+                      <div className="grid grid-cols-3 gap-4 max-h-[380px] overflow-y-auto pr-2">
+                        {Array.from({ length: Math.min(6, uploadedFile.pages) }).map((_, idx) => (
+                          <PageThumbnail
+                            key={idx}
+                            pageNumber={idx + 1}
+                            totalPages={uploadedFile.pages}
+                            isSelected={idx === 0}
+                            previewUrl={uploadedFile.previewUrl}
+                            fileName={uploadedFile.name}
+                          />
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 </GlassPanel>
 
@@ -671,14 +757,20 @@ export default function TouchscreenKioskPage() {
 
             {/* SCREEN 9: THANK YOU */}
             {currentScreen === 9 && (
-              <div className="max-w-4xl mx-auto space-y-8 py-16">
+              <div className="max-w-4xl mx-auto space-y-8 py-16 text-center">
                 <h1 className="text-kiosk-display font-black text-ink">PrintQ</h1>
                 <h2 className="text-kiosk-h1 font-bold text-ink2">Thank you</h2>
                 <p className="text-kiosk-body text-ink3">Your print job is complete</p>
 
                 {/* Progress auto-return line */}
-                <div className="w-full h-2 bg-ink/10 rounded-pill overflow-hidden mt-12">
+                <div className="w-full h-2 bg-ink/10 rounded-pill overflow-hidden mt-8 max-w-lg mx-auto">
                   <div className="h-full bg-ink animate-[pulse_5s_linear_infinite]" />
+                </div>
+
+                <div className="pt-6">
+                  <Button variant="primary" size="lg" className="mx-auto" onClick={resetAndStartNewSession}>
+                    Start New Print Session →
+                  </Button>
                 </div>
               </div>
             )}

@@ -27,6 +27,8 @@ export async function POST(req: NextRequest) {
     let totalPages = 1;
     let buffer: Buffer | null = null;
 
+    let previewUrl: string | undefined = undefined;
+
     if (contentType.includes('application/json')) {
       const json = await req.json();
       token = json.token || token;
@@ -34,6 +36,7 @@ export async function POST(req: NextRequest) {
       fileSize = json.fileSize || json.size || fileSize;
       fileType = json.fileType || json.type || fileType;
       totalPages = json.clientPages || json.pages || 1;
+      previewUrl = json.previewUrl;
       if (json.base64) {
         try {
           const rawBase64 = json.base64.includes(',') ? json.base64.split(',')[1] : json.base64;
@@ -52,6 +55,8 @@ export async function POST(req: NextRequest) {
       const file = formData.get('file') as File | null;
       token = (formData.get('token') as string | null) || token;
       const clientPagesStr = formData.get('clientPages') as string | null;
+      const previewUrlStr = formData.get('previewUrl') as string | null;
+      if (previewUrlStr) previewUrl = previewUrlStr;
 
       if (!file) {
         return NextResponse.json({ error: 'No file provided' }, { status: 400, headers: corsHeaders });
@@ -106,6 +111,8 @@ export async function POST(req: NextRequest) {
       path: filePath,
       pages: Math.max(1, totalPages),
       size: fileSize,
+      type: fileType,
+      previewUrl,
     };
 
     // Update session state with real file details

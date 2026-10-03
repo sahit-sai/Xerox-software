@@ -69,6 +69,18 @@ export default function PhoneUploadPage() {
       formData.append('file', selectedFile);
       formData.append('token', rawToken);
 
+      let previewUrl: string | undefined = undefined;
+      if (selectedFile.type.startsWith('image/')) {
+        try {
+          previewUrl = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.readAsDataURL(selectedFile);
+          });
+          formData.append('previewUrl', previewUrl);
+        } catch (e) {}
+      }
+
       // Attempt client-side PDF page count for immediate UX feedback
       let clientPages = 1;
       if (selectedFile.type === 'application/pdf' || selectedFile.name.endsWith('.pdf')) {
@@ -118,6 +130,7 @@ export default function PhoneUploadPage() {
               fileSize: selectedFile.size,
               fileType: selectedFile.type,
               clientPages,
+              previewUrl,
             }),
           });
         } catch (jsonErr: any) {
