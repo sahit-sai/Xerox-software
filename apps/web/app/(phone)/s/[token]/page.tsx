@@ -69,21 +69,53 @@ export default function PhoneUploadPage() {
       formData.append('file', selectedFile);
       formData.append('token', rawToken);
 
+      // Attempt client-side PDF page count for immediate UX feedback
+      if (selectedFile.type === 'application/pdf' || selectedFile.name.endsWith('.pdf')) {
+        try {
+          const { PDFDocument } = await import('pdf-lib');
+          const buffer = await selectedFile.arrayBuffer();
+          const pdfDoc = await PDFDocument.load(buffer, { ignoreEncryption: true });
+          const pages = pdfDoc.getPageCount();
+          formData.append('clientPages', pages.toString());
+        } catch (e) {
+          // Fallback server parsing
+        }
+      }
+
       // Simulate step progress for fast UX
       const interval = setInterval(() => {
         setUploadProgress((prev) => (prev >= 90 ? prev : prev + 25));
       }, 150);
 
-      const res = await fetch('/api/sessions/upload', {
-        method: 'POST',
-        body: formData,
-      });
+      let res: Response;
+      try {
+        res = await fetch('/api/sessions/upload', {
+          method: 'POST',
+          body: formData,
+        });
+      } catch (netErr: any) {
+        clearInterval(interval);
+        throw new Error(
+          netErr?.message?.includes('Failed to fetch')
+            ? 'Network connection error during upload. Please check your connection and retry.'
+            : netErr?.message || 'File upload failed'
+        );
+      }
 
       clearInterval(interval);
       setUploadProgress(100);
 
-      const data = await res.json();
-      if (!res.ok) {
+      let data: any = {};
+      try {
+        data = await res.json();
+      } catch (jsonErr) {
+        if (res.status === 413) {
+          throw new Error('File size exceeds server payload limit. Please select a smaller file (under 15 MB).');
+        }
+        throw new Error('Server returned invalid response during upload.');
+      }
+
+      if (!res.ok || !data.success) {
         throw new Error(data.error || 'Upload failed');
       }
 
