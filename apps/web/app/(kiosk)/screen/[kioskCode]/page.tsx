@@ -119,7 +119,7 @@ export default function TouchscreenKioskPage() {
   useEffect(() => {
     if (currentScreen !== 6) return;
     const generateUpiQr = async () => {
-      const upiUrl = `upi://pay?pa=printq@upi&pn=PrintQ%20Kiosk&tr=${sessionId || 'JOB_' + Date.now()}&tn=PrintQ%20Order&am=${pricing.totalRupees}&cu=INR`;
+      const upiUrl = `upi://pay?pa=7842410691@ybl&pn=PrintQ%20Kiosk&tr=${sessionId || 'JOB_' + Date.now()}&tn=PrintQ%20Order&am=${pricing.totalRupees}&cu=INR`;
       try {
         const url = await QRCode.toDataURL(upiUrl, { width: 440, margin: 2 });
         setPaymentQrDataUrl(url);
@@ -694,11 +694,11 @@ export default function TouchscreenKioskPage() {
                     ) : (
                       <QRCard
                         qrDataUrl={paymentQrDataUrl || qrDataUrl}
-                        shortCode="printq@upi"
+                        shortCode="7842410691@ybl"
                         label="UPI VPA ID"
                         countdownSeconds={countdown}
                         maxSeconds={90}
-                        subtitle="Scan with Google Pay, PhonePe, Paytm or BHIM"
+                        subtitle="Scan with PhonePe, Google Pay, Paytm or BHIM"
                       />
                     )}
                   </GlassPanel>
