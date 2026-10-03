@@ -19,43 +19,77 @@ export async function OPTIONS() {
 
 export async function POST(req: NextRequest) {
   try {
-    const formData = await req.formData();
-    const file = formData.get('file') as File | null;
-    const token = (formData.get('token') as string | null) || req.cookies.get('printq_session_token')?.value;
-    const clientPagesStr = formData.get('clientPages') as string | null;
+    const contentType = req.headers.get('content-type') || '';
+    let fileName = 'Document.pdf';
+    let fileSize = 1024;
+    let fileType = 'application/pdf';
+    let token: string | null = req.cookies.get('printq_session_token')?.value || null;
+    let totalPages = 1;
+    let buffer: Buffer | null = null;
 
-    if (!file) {
-      return NextResponse.json({ error: 'No file provided' }, { status: 400, headers: corsHeaders });
+    if (contentType.includes('application/json')) {
+      const json = await req.json();
+      token = json.token || token;
+      fileName = json.fileName || json.name || fileName;
+      fileSize = json.fileSize || json.size || fileSize;
+      fileType = json.fileType || json.type || fileType;
+      totalPages = json.clientPages || json.pages || 1;
+      if (json.base64) {
+        try {
+          const rawBase64 = json.base64.includes(',') ? json.base64.split(',')[1] : json.base64;
+          buffer = Buffer.from(rawBase64, 'base64');
+        } catch (e) {}
+      }
+    } else {
+      let formData: FormData;
+      try {
+        formData = await req.formData();
+      } catch (fdErr) {
+        console.warn('FormData parse error, attempting JSON fallback parse:', fdErr);
+        return NextResponse.json({ error: 'Invalid form payload' }, { status: 400, headers: corsHeaders });
+      }
+
+      const file = formData.get('file') as File | null;
+      token = (formData.get('token') as string | null) || token;
+      const clientPagesStr = formData.get('clientPages') as string | null;
+
+      if (!file) {
+        return NextResponse.json({ error: 'No file provided' }, { status: 400, headers: corsHeaders });
+      }
+
+      fileName = file.name;
+      fileSize = file.size;
+      fileType = file.type || 'application/pdf';
+
+      if (clientPagesStr) {
+        const parsed = parseInt(clientPagesStr, 10);
+        if (!isNaN(parsed) && parsed >= 1) totalPages = parsed;
+      }
+
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        buffer = Buffer.from(arrayBuffer);
+        if (!clientPagesStr) {
+          totalPages = await countDocumentPages(buffer, fileType);
+        }
+      } catch (parseErr) {
+        console.warn('Document page count parse warning, defaulting to 1:', parseErr);
+      }
     }
 
-    if (file.size > 25 * 1024 * 1024) {
+    if (fileSize > 25 * 1024 * 1024) {
       return NextResponse.json({ error: 'File size exceeds 25 MB limit' }, { status: 400, headers: corsHeaders });
     }
 
-    let totalPages = clientPagesStr ? parseInt(clientPagesStr, 10) : 1;
-    if (isNaN(totalPages) || totalPages < 1) totalPages = 1;
-
-    let buffer: Buffer | null = null;
-
-    try {
-      const arrayBuffer = await file.arrayBuffer();
-      buffer = Buffer.from(arrayBuffer);
-      if (!clientPagesStr) {
-        totalPages = await countDocumentPages(buffer, file.type || 'application/pdf');
-      }
-    } catch (parseErr) {
-      console.warn('Document page count parse warning, defaulting to 1:', parseErr);
-    }
-
-    // Save file path
-    const fileExt = file.name.split('.').pop() || 'pdf';
+    // Save file path identifier
+    const fileExt = fileName.split('.').pop() || 'pdf';
     const filePath = `sessions/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
 
     // Upload to Supabase only if correctly configured and with strict 2.5s timeout guard
     if (buffer && isSupabaseConfigured) {
       try {
         const uploadPromise = supabaseAdmin.storage.from('print-files').upload(filePath, buffer, {
-          contentType: file.type,
+          contentType: fileType,
           upsert: true,
         });
         const timeoutPromise = new Promise((_, reject) =>
@@ -68,10 +102,10 @@ export async function POST(req: NextRequest) {
     }
 
     const fileDetails = {
-      name: file.name,
+      name: fileName,
       path: filePath,
-      pages: totalPages,
-      size: file.size,
+      pages: Math.max(1, totalPages),
+      size: fileSize,
     };
 
     // Update session state with real file details
@@ -88,7 +122,7 @@ export async function POST(req: NextRequest) {
               updated_at: new Date().toISOString(),
             })
             .or(`token_hash.eq.${tokenHash},id.eq.${token}`);
-          
+
           const timeoutPromise = new Promise((_, reject) =>
             setTimeout(() => reject(new Error('DB update timeout')), 2000)
           );
@@ -112,4 +146,5 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
 

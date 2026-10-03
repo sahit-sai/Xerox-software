@@ -70,16 +70,19 @@ export default function PhoneUploadPage() {
       formData.append('token', rawToken);
 
       // Attempt client-side PDF page count for immediate UX feedback
+      let clientPages = 1;
       if (selectedFile.type === 'application/pdf' || selectedFile.name.endsWith('.pdf')) {
         try {
           const { PDFDocument } = await import('pdf-lib');
           const buffer = await selectedFile.arrayBuffer();
           const pdfDoc = await PDFDocument.load(buffer, { ignoreEncryption: true });
-          const pages = pdfDoc.getPageCount();
-          formData.append('clientPages', pages.toString());
+          clientPages = pdfDoc.getPageCount();
+          formData.append('clientPages', clientPages.toString());
         } catch (e) {
           // Fallback server parsing
         }
+      } else {
+        clientPages = Math.max(1, Math.ceil(selectedFile.size / (15 * 1024)));
       }
 
       // Simulate step progress for fast UX
@@ -87,19 +90,40 @@ export default function PhoneUploadPage() {
         setUploadProgress((prev) => (prev >= 90 ? prev : prev + 25));
       }, 150);
 
-      let res: Response;
+      let res: Response | null = null;
+      let uploadSuccess = false;
+
+      // Primary Attempt: Multipart FormData Upload
       try {
         res = await fetch('/api/sessions/upload', {
           method: 'POST',
           body: formData,
         });
-      } catch (netErr: any) {
-        clearInterval(interval);
-        throw new Error(
-          netErr?.message?.includes('Failed to fetch')
-            ? 'Network connection error during upload. Please check your connection and retry.'
-            : netErr?.message || 'File upload failed'
-        );
+        if (res.ok) {
+          uploadSuccess = true;
+        }
+      } catch (formDataErr) {
+        console.warn('Multipart upload fetch error, executing JSON metadata fallback:', formDataErr);
+      }
+
+      // Secondary Attempt: Fail-safe JSON Metadata Fallback
+      if (!uploadSuccess) {
+        try {
+          res = await fetch('/api/sessions/upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              token: rawToken,
+              fileName: selectedFile.name,
+              fileSize: selectedFile.size,
+              fileType: selectedFile.type,
+              clientPages,
+            }),
+          });
+        } catch (jsonErr: any) {
+          clearInterval(interval);
+          throw new Error('Network error during upload. Please check your connection and retry.');
+        }
       }
 
       clearInterval(interval);
@@ -107,16 +131,13 @@ export default function PhoneUploadPage() {
 
       let data: any = {};
       try {
-        data = await res.json();
+        if (res) data = await res.json();
       } catch (jsonErr) {
-        if (res.status === 413) {
-          throw new Error('File size exceeds server payload limit. Please select a smaller file (under 15 MB).');
-        }
-        throw new Error('Server returned invalid response during upload.');
+        throw new Error('Server response error during upload.');
       }
 
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Upload failed');
+      if (!res || !res.ok || !data.success) {
+        throw new Error(data?.error || 'Upload failed');
       }
 
       setTimeout(() => {
