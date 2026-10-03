@@ -5,8 +5,9 @@ interface QRCardProps {
   shortCode: string;
   countdownSeconds?: number;
   maxSeconds?: number;
+  label?: string;
   subtitle?: string;
-  size?: number; // 520px default
+  size?: number; // 460px default
 }
 
 export const QRCard: React.FC<QRCardProps> = ({
@@ -14,6 +15,7 @@ export const QRCard: React.FC<QRCardProps> = ({
   shortCode,
   countdownSeconds = 90,
   maxSeconds = 90,
+  label = 'Kiosk Backup Code',
   subtitle = 'Scan with your phone camera to upload your file',
   size = 460,
 }) => {
@@ -23,7 +25,7 @@ export const QRCard: React.FC<QRCardProps> = ({
   const progressOffset = circumference - (countdownSeconds / maxSeconds) * circumference;
 
   return (
-    <div className="flex flex-col items-center justify-center space-y-6">
+    <div className="flex flex-col items-center justify-center space-y-6 select-none">
       {/* Container with Countdown Ring */}
       <div className="relative flex items-center justify-center">
         {/* Animated SVG Ring */}
@@ -66,9 +68,9 @@ export const QRCard: React.FC<QRCardProps> = ({
         </div>
       </div>
 
-      {/* Backup Code */}
+      {/* Code / UPI ID */}
       <div className="text-center space-y-1">
-        <span className="text-kiosk-small font-semibold text-ink2 uppercase tracking-wider block">Kiosk Backup Code</span>
+        <span className="text-kiosk-small font-semibold text-ink2 uppercase tracking-wider block">{label}</span>
         <div className="text-kiosk-h2 font-mono font-black text-ink tracking-[0.08em] tabular-nums bg-white/70 px-6 py-2 rounded-control border border-slate-900/10 inline-block shadow-sm">
           {shortCode}
         </div>
@@ -77,3 +79,4 @@ export const QRCard: React.FC<QRCardProps> = ({
     </div>
   );
 };
+

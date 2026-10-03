@@ -69,6 +69,7 @@ export default function TouchscreenKioskPage() {
   const [showNumpad, setShowNumpad] = useState<boolean>(false);
 
   // Payment & Printing Progress (Screen 6, 7, 8, 9)
+  const [paymentQrDataUrl, setPaymentQrDataUrl] = useState<string>('');
   const [tokenNo, setTokenNo] = useState<string>('Token 07');
   const [printedPages, setPrintedPages] = useState<number>(1);
   const [paymentSuccess, setPaymentSuccess] = useState<boolean>(false);
@@ -113,6 +114,21 @@ export default function TouchscreenKioskPage() {
       console.error('Session creation error:', err);
     }
   };
+
+  // Generate Real UPI Payment QR Code when entering Screen 6
+  useEffect(() => {
+    if (currentScreen !== 6) return;
+    const generateUpiQr = async () => {
+      const upiUrl = `upi://pay?pa=printq@upi&pn=PrintQ%20Kiosk&tr=${sessionId || 'JOB_' + Date.now()}&tn=PrintQ%20Order&am=${pricing.totalRupees}&cu=INR`;
+      try {
+        const url = await QRCode.toDataURL(upiUrl, { width: 440, margin: 2 });
+        setPaymentQrDataUrl(url);
+      } catch (e) {
+        console.error('UPI QR generation error:', e);
+      }
+    };
+    generateUpiQr();
+  }, [currentScreen, pricing.totalRupees, sessionId]);
 
   // Reset state & create a new session once printing completes
   const resetAndStartNewSession = () => {
@@ -677,11 +693,12 @@ export default function TouchscreenKioskPage() {
                       </div>
                     ) : (
                       <QRCard
-                        qrDataUrl={qrDataUrl}
-                        shortCode={shortCode}
+                        qrDataUrl={paymentQrDataUrl || qrDataUrl}
+                        shortCode="printq@upi"
+                        label="UPI VPA ID"
                         countdownSeconds={countdown}
                         maxSeconds={90}
-                        subtitle="Dynamic UPI QR Code"
+                        subtitle="Scan with Google Pay, PhonePe, Paytm or BHIM"
                       />
                     )}
                   </GlassPanel>
