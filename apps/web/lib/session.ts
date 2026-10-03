@@ -233,3 +233,34 @@ export async function claimSessionByToken(tokenOrHash: string, deviceId: string)
 
   return { success: false, reason: 'expired' };
 }
+
+export function getSessionStatus(tokenOrHash: string) {
+  const calculatedHash = crypto.createHash('sha256').update(tokenOrHash).digest('hex');
+  const sess = memorySessions.get(calculatedHash) || memorySessions.get(tokenOrHash);
+  if (sess) {
+    return { success: true, session: sess };
+  }
+  return { success: false, session: null };
+}
+
+export function updateSessionFile(tokenOrHash: string, fileInfo: { name: string; pages: number; path: string; size: number }) {
+  const calculatedHash = crypto.createHash('sha256').update(tokenOrHash).digest('hex');
+  let sess = memorySessions.get(calculatedHash) || memorySessions.get(tokenOrHash);
+
+  if (!sess) {
+    sess = {
+      id: crypto.randomUUID(),
+      kiosk_id: 'VISHNU01',
+      token_hash: calculatedHash,
+      state: 'file_ready',
+    };
+  }
+
+  sess.state = 'file_ready';
+  sess.file = fileInfo;
+  sess.updated_at = new Date().toISOString();
+
+  memorySessions.set(calculatedHash, sess);
+  memorySessions.set(tokenOrHash, sess);
+  return sess;
+}

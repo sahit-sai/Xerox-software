@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { countDocumentPages } from '@/lib/pdf';
+import { updateSessionFile } from '@/lib/session';
 import crypto from 'crypto';
 
 export async function POST(req: NextRequest) {
@@ -34,26 +35,32 @@ export async function POST(req: NextRequest) {
       console.warn('Storage upload warning:', e);
     }
 
-    // Update session state to file_uploaded & file_ready
+    const fileDetails = {
+      name: file.name,
+      path: filePath,
+      pages: totalPages,
+      size: file.size,
+    };
+
+    // Update session state with real file details
     if (token) {
+      updateSessionFile(token, fileDetails);
+
       const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-      await supabaseAdmin
-        .from('sessions')
-        .update({
-          state: 'file_ready',
-          updated_at: new Date().toISOString(),
-        })
-        .or(`token_hash.eq.${tokenHash},id.eq.${token}`);
+      try {
+        await supabaseAdmin
+          .from('sessions')
+          .update({
+            state: 'file_ready',
+            updated_at: new Date().toISOString(),
+          })
+          .or(`token_hash.eq.${tokenHash},id.eq.${token}`);
+      } catch (err) {}
     }
 
     return NextResponse.json({
       success: true,
-      file: {
-        name: file.name,
-        path: filePath,
-        pages: totalPages,
-        size: file.size,
-      },
+      file: fileDetails,
     });
   } catch (error: any) {
     console.error('Session upload error:', error);

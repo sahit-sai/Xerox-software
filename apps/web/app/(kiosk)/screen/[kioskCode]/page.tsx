@@ -124,6 +124,31 @@ export default function TouchscreenKioskPage() {
     return () => clearInterval(timer);
   }, [currentScreen]);
 
+  // Real-time Session Polling for Screen 2 (Detect Phone Connected & Real File Upload)
+  useEffect(() => {
+    if (currentScreen !== 2 || !rawToken) return;
+    const pollInterval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/sessions/status?token=${encodeURIComponent(rawToken)}`);
+        const data = await res.json();
+        if (data.session) {
+          if (data.session.state === 'phone_connected') {
+            setPhoneConnected(true);
+          } else if (data.session.state === 'file_ready' && data.session.file) {
+            setUploadedFile({
+              name: data.session.file.name,
+              pages: data.session.file.pages || 1,
+            });
+            setCurrentScreen(3); // Auto-advance to Preview Screen on real file upload!
+          }
+        }
+      } catch (e) {}
+    }, 1200);
+
+    return () => clearInterval(pollInterval);
+  }, [currentScreen, rawToken]);
+
+
   // Screen 7 Printing animation loop
   useEffect(() => {
     if (currentScreen !== 7) return;
