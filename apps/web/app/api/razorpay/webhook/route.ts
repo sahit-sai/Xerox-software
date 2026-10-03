@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { verifyWebhookSignature } from '@/lib/razorpay';
+import { updateSessionState } from '@/lib/session';
 
 export async function POST(req: NextRequest) {
   try {
@@ -20,7 +21,12 @@ export async function POST(req: NextRequest) {
     if (event === 'payment.captured' || payload.mock_payment === true) {
       const paymentEntity = payload.payload?.payment?.entity || {};
       const orderId = paymentEntity.order_id || payload.order_id;
+      const sessionToken = paymentEntity.notes?.token || payload.notes?.token || payload.token;
       const paymentId = paymentEntity.id || payload.payment_id || `pay_${Date.now()}`;
+
+      if (sessionToken) {
+        updateSessionState(sessionToken, 'paid');
+      }
 
       if (orderId) {
         // Fetch job associated with orderId
@@ -65,3 +71,4 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
+

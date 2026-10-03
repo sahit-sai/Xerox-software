@@ -243,7 +243,7 @@ export function getSessionStatus(tokenOrHash: string) {
   return { success: false, session: null };
 }
 
-export function updateSessionFile(tokenOrHash: string, fileInfo: { name: string; pages: number; path: string; size: number }) {
+export function updateSessionFile(tokenOrHash: string, fileInfo: { name: string; pages: number; path: string; size: number; type?: string; previewUrl?: string }) {
   const calculatedHash = crypto.createHash('sha256').update(tokenOrHash).digest('hex');
   let sess = memorySessions.get(calculatedHash) || memorySessions.get(tokenOrHash);
 
@@ -264,3 +264,17 @@ export function updateSessionFile(tokenOrHash: string, fileInfo: { name: string;
   memorySessions.set(tokenOrHash, sess);
   return sess;
 }
+
+export function updateSessionState(tokenOrHash: string, newState: SessionState) {
+  const calculatedHash = crypto.createHash('sha256').update(tokenOrHash).digest('hex');
+  let sess = memorySessions.get(calculatedHash) || memorySessions.get(tokenOrHash);
+
+  if (sess) {
+    sess.state = newState;
+    sess.updated_at = new Date().toISOString();
+    memorySessions.set(calculatedHash, sess);
+    memorySessions.set(tokenOrHash, sess);
+  }
+  return sess;
+}
+

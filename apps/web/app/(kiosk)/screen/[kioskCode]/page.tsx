@@ -193,6 +193,23 @@ export default function TouchscreenKioskPage() {
     return () => clearInterval(pollInterval);
   }, [currentScreen, rawToken]);
 
+  // Real-time Payment Polling for Screen 6 (Detect Payment Paid via Webhook / Phone / Razorpay API)
+  useEffect(() => {
+    if (currentScreen !== 6 || !rawToken) return;
+    const pollInterval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/sessions/status?token=${encodeURIComponent(rawToken)}`);
+        const data = await res.json();
+        if (data.session && data.session.state === 'paid') {
+          setPaymentSuccess(true);
+          setTimeout(() => setCurrentScreen(7), 1000);
+        }
+      } catch (e) {}
+    }, 1200);
+
+    return () => clearInterval(pollInterval);
+  }, [currentScreen, rawToken]);
+
   // Screen 7 Printing animation loop
   useEffect(() => {
     if (currentScreen !== 7) return;
