@@ -2,9 +2,10 @@
 
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { Upload, CheckCircle2, AlertCircle, FileText, Loader2 } from 'lucide-react';
+import { Upload, CheckCircle2, AlertCircle, FileText, Loader2, Sliders } from 'lucide-react';
 import { GlassPanel } from '@/components/ui/GlassPanel';
 import { Button } from '@/components/ui/Button';
+import { DocumentEditor, DocEditState } from '@/components/ui/DocumentEditor';
 
 export default function PhoneUploadPage() {
   const params = useParams();
@@ -16,6 +17,8 @@ export default function PhoneUploadPage() {
   const [file, setFile] = useState<File | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [showDocEditor, setShowDocEditor] = useState<boolean>(false);
+  const [previewDataUrl, setPreviewDataUrl] = useState<string | undefined>(undefined);
 
   // Claim session automatically on page load
   useEffect(() => {
@@ -78,6 +81,7 @@ export default function PhoneUploadPage() {
           reader.readAsDataURL(selectedFile);
         });
         if (previewUrl) {
+          setPreviewDataUrl(previewUrl);
           formData.append('previewUrl', previewUrl);
         }
       } catch (e) {
@@ -247,9 +251,30 @@ export default function PhoneUploadPage() {
                   Continue on the kiosk screen to choose copies and print.
                 </p>
               </div>
+
+              <Button
+                variant="ghost"
+                size="md"
+                className="w-full flex items-center justify-center gap-2"
+                onClick={() => setShowDocEditor(true)}
+              >
+                <Sliders className="w-4 h-4 text-signalCyan" /> Edit & Crop Document
+              </Button>
             </GlassPanel>
           )}
         </div>
+      )}
+
+      {/* Phone Document Editor Overlay */}
+      {showDocEditor && file && (
+        <DocumentEditor
+          fileName={file.name}
+          totalPages={1}
+          previewUrl={previewDataUrl}
+          fileType={file.type}
+          onClose={() => setShowDocEditor(false)}
+          onSave={() => setShowDocEditor(false)}
+        />
       )}
     </main>
   );

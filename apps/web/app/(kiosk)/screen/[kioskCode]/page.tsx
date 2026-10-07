@@ -6,7 +6,7 @@ import QRCode from 'qrcode';
 import {
   Printer, QrCode, AlertTriangle, CheckCircle2, RefreshCw, FileText,
   Smartphone, ArrowDown, CreditCard, ShieldCheck, ArrowLeft, Clock,
-  ChevronRight, AlertCircle, XCircle, Eye, ZoomIn, ZoomOut, Maximize2, X, ChevronLeft
+  ChevronRight, AlertCircle, XCircle, Eye, ZoomIn, ZoomOut, Maximize2, X, ChevronLeft, Sliders
 } from 'lucide-react';
 import { calculateJobPrice, calculateSheets, KioskState, SessionState } from '@printq/shared';
 import { GlassPanel, GlassControl } from '@/components/ui/GlassPanel';
@@ -20,6 +20,7 @@ import { ProgressBar } from '@/components/ui/ProgressBar';
 import { StatusPill } from '@/components/ui/StatusPill';
 import { ToastBanner } from '@/components/ui/ToastBanner';
 import { PageThumbnail } from '@/components/ui/PageThumbnail';
+import { DocumentEditor, DocEditState } from '@/components/ui/DocumentEditor';
 
 export default function TouchscreenKioskPage() {
   const params = useParams();
@@ -63,6 +64,8 @@ export default function TouchscreenKioskPage() {
   const [selectedPreviewPage, setSelectedPreviewPage] = useState<number>(1);
   const [showFullscreenDocModal, setShowFullscreenDocModal] = useState<boolean>(false);
   const [docZoomLevel, setDocZoomLevel] = useState<number>(100);
+  const [showDocEditor, setShowDocEditor] = useState<boolean>(false);
+  const [docEditState, setDocEditState] = useState<DocEditState | null>(null);
 
   // Print Options State (Screen 4)
   const [copies, setCopies] = useState<number>(1);
@@ -517,6 +520,13 @@ export default function TouchscreenKioskPage() {
                     <Button
                       variant="ghost"
                       size="lg"
+                      onClick={() => setShowDocEditor(true)}
+                    >
+                      <Sliders className="w-5 h-5 text-signalCyan" /> Edit & Crop Document
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="lg"
                       onClick={() => setShowFullscreenDocModal(true)}
                     >
                       <Eye className="w-5 h-5 text-signalCyan" /> Inspect Live Document
@@ -856,6 +866,21 @@ export default function TouchscreenKioskPage() {
       </div>
 
       {/* GLOBAL KIOSK OVERLAYS */}
+      {/* 0. Document Editor Modal (Rotate, Crop, Filters) */}
+      {showDocEditor && uploadedFile && (
+        <DocumentEditor
+          fileName={uploadedFile.name}
+          totalPages={uploadedFile.pages}
+          previewUrl={uploadedFile.previewUrl}
+          fileType={uploadedFile.type}
+          onClose={() => setShowDocEditor(false)}
+          onSave={(editedState) => {
+            setDocEditState(editedState);
+            setShowDocEditor(false);
+          }}
+        />
+      )}
+
       {/* 1. Live Document Inspection Modal */}
       {showFullscreenDocModal && uploadedFile && (
         <div className="fixed inset-0 z-50 glass-1 backdrop-blur-2xl flex items-center justify-center p-6 bg-slate-950/80">
