@@ -1,4 +1,7 @@
 import unittest
+import sys
+import os
+import logging
 from agent import generate_hmac_signature
 from mock_printer import MockPrinter
 
@@ -22,5 +25,17 @@ class TestKioskAgent(unittest.TestCase):
         self.assertTrue(result)
         self.assertEqual(progress_counts, [1, 2])
 
+def run_manual_trigger(file_name="sample_test_document.pdf", copies=1, pages=3):
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    logger = logging.getLogger("PrintTrigger")
+    logger.info(f"Triggering manual print test for '{file_name}' ({pages} pages, {copies} copies)...")
+    printer = MockPrinter("KioskPrinter")
+    options = {"copies": copies, "pages": pages, "sheets": pages * copies}
+    return printer.print_file(file_name, options, lambda p: logger.info(f"Progress: sheet {p}/{pages*copies}"))
+
 if __name__ == "__main__":
-    unittest.main()
+    if len(sys.argv) > 1 and sys.argv[1] == "--trigger":
+        run_manual_trigger()
+    else:
+        unittest.main()
+

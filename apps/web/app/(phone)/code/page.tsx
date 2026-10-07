@@ -2,7 +2,9 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Printer, Keyboard, ArrowRight, AlertTriangle, ShieldCheck, RefreshCw } from 'lucide-react';
+import { Printer, Keyboard, ArrowRight, AlertCircle, RefreshCw } from 'lucide-react';
+import { GlassPanel } from '@/components/ui/GlassPanel';
+import { Button } from '@/components/ui/Button';
 
 export default function BackupCodePage() {
   const router = useRouter();
@@ -42,57 +44,72 @@ export default function BackupCodePage() {
   };
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6 selection:bg-emerald-500/30">
-      <div className="w-full max-w-md space-y-6">
+    <main className="min-h-screen bg-bgBase text-ink px-5 py-8 flex flex-col justify-between max-w-md mx-auto relative overflow-hidden font-sans selection:bg-signalCyan/20">
+      {/* Drifting CMYK Blobs */}
+      <div className="cmyk-blob-cyan opacity-50" />
+      <div className="cmyk-blob-magenta opacity-50" />
+
+      <div className="space-y-6 relative z-10 my-auto">
+        {/* Brand Header */}
         <div className="text-center space-y-2">
-          <div className="inline-flex p-3 bg-gradient-to-tr from-emerald-500 to-cyan-500 text-slate-950 rounded-2xl shadow-lg shadow-emerald-500/20 mb-1">
-            <Printer className="w-8 h-8" />
+          <div className="inline-flex p-3.5 glass-2 rounded-control text-ink shadow-sm border border-ink/10 mb-2">
+            <Printer className="w-8 h-8 text-signalCyan stroke-[1.75]" />
           </div>
-          <h1 className="text-2xl font-black text-white">Enter Kiosk Code</h1>
-          <p className="text-xs text-slate-400 font-medium">
-            Type the 6-character backup code shown under the QR code on the kiosk screen
+          <h1 className="text-[28px] font-bold text-ink tracking-tight">Enter Kiosk Code</h1>
+          <p className="text-[14px] font-normal text-ink2 leading-relaxed max-w-xs mx-auto">
+            Type the 6-character backup code displayed on the kiosk screen
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="glass-panel rounded-3xl p-6 shadow-2xl space-y-5 border border-white/10">
-          <div className="space-y-2">
-            <label className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
-              <Keyboard className="w-4 h-4 text-emerald-400" /> Kiosk Backup Code
-            </label>
-            <input
-              type="text"
-              maxLength={7}
-              placeholder="e.g. K7P-2QX"
-              value={code}
-              onChange={(e) => setCode(e.target.value.toUpperCase())}
-              className="w-full bg-slate-900 border border-white/10 rounded-2xl px-4 py-4 text-center text-2xl font-mono font-black text-emerald-400 tracking-widest focus:outline-none focus:border-emerald-500 uppercase"
-            />
-          </div>
-
-          {errorMessage && (
-            <div className="bg-red-950/80 border border-red-500/40 text-red-200 p-3 rounded-xl text-xs font-bold flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
-              <span>{errorMessage}</span>
+        {/* Code Entry Form Panel */}
+        <GlassPanel className="p-7 space-y-6 border border-ink/10">
+          <form onSubmit={handleSubmit} className="space-y-5">
+            <div className="space-y-2">
+              <label className="text-[12px] font-bold uppercase tracking-wider text-ink2 flex items-center justify-center gap-2">
+                <Keyboard className="w-4 h-4 text-signalCyan" /> Kiosk Backup Code
+              </label>
+              <input
+                type="text"
+                maxLength={7}
+                placeholder="K7P-2QX"
+                value={code}
+                onChange={(e) => setCode(e.target.value.toUpperCase())}
+                className="w-full bg-white/70 border border-ink/15 rounded-control px-4 py-4 text-center text-3xl font-mono font-black text-ink tracking-[0.15em] focus:outline-none focus:border-signalCyan focus:ring-2 focus:ring-signalCyan/20 transition uppercase shadow-inner"
+              />
             </div>
-          )}
 
-          <button
-            type="submit"
-            disabled={isSubmitting || code.length < 6}
-            className="w-full bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 text-slate-950 font-black py-4 rounded-2xl shadow-lg shadow-emerald-500/20 transition flex items-center justify-center gap-2 text-base"
-          >
-            {isSubmitting ? (
-              <>
-                <RefreshCw className="w-5 h-5 animate-spin" /> Verifying...
-              </>
-            ) : (
-              <>
-                Connect to Kiosk <ArrowRight className="w-5 h-5" />
-              </>
+            {errorMessage && (
+              <div className="p-4 bg-error/10 border border-error/20 text-error rounded-control text-[14px] font-medium flex items-center gap-2.5">
+                <AlertCircle className="w-5 h-5 shrink-0" />
+                <span>{errorMessage}</span>
+              </div>
             )}
-          </button>
-        </form>
+
+            <Button
+              type="submit"
+              variant="primary"
+              size="lg"
+              disabled={isSubmitting || code.length < 6}
+              className="w-full flex items-center justify-center gap-2"
+            >
+              {isSubmitting ? (
+                <>
+                  <RefreshCw className="w-5 h-5 animate-spin" /> Verifying Code...
+                </>
+              ) : (
+                <>
+                  Connect to Kiosk <ArrowRight className="w-5 h-5" />
+                </>
+              )}
+            </Button>
+          </form>
+        </GlassPanel>
       </div>
+
+      <footer className="text-center relative z-10 pt-4">
+        <p className="text-[12px] text-ink3 font-medium">PrintQ Self-Service Kiosks · Fast & Secure</p>
+      </footer>
     </main>
   );
 }
+
