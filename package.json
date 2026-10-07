@@ -5,7 +5,8 @@
     "dev:web": "pnpm --filter web dev",
     "build:web": "pnpm --filter web build",
     "build:shared": "pnpm --filter shared build",
-    "build": "pnpm build:shared && pnpm build:web"
+    "build": "pnpm build:shared && pnpm build:web",
+    "start": "pnpm --filter web start"
   },
   "devDependencies": {
     "typescript": "^5.4.5"
