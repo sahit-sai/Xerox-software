@@ -70,15 +70,18 @@ export default function PhoneUploadPage() {
       formData.append('token', rawToken);
 
       let previewUrl: string | undefined = undefined;
-      if (selectedFile.type.startsWith('image/')) {
-        try {
-          previewUrl = await new Promise<string>((resolve) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result as string);
-            reader.readAsDataURL(selectedFile);
-          });
+      try {
+        previewUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error('Failed to read file preview'));
+          reader.readAsDataURL(selectedFile);
+        });
+        if (previewUrl) {
           formData.append('previewUrl', previewUrl);
-        } catch (e) {}
+        }
+      } catch (e) {
+        console.warn('Live preview DataURL generation skipped:', e);
       }
 
       // Attempt client-side PDF page count for immediate UX feedback

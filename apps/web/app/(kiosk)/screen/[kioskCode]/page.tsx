@@ -6,7 +6,7 @@ import QRCode from 'qrcode';
 import {
   Printer, QrCode, AlertTriangle, CheckCircle2, RefreshCw, FileText,
   Smartphone, ArrowDown, CreditCard, ShieldCheck, ArrowLeft, Clock,
-  ChevronRight, AlertCircle, XCircle
+  ChevronRight, AlertCircle, XCircle, Eye, ZoomIn, ZoomOut, Maximize2, X, ChevronLeft
 } from 'lucide-react';
 import { calculateJobPrice, calculateSheets, KioskState, SessionState } from '@printq/shared';
 import { GlassPanel, GlassControl } from '@/components/ui/GlassPanel';
@@ -58,6 +58,11 @@ export default function TouchscreenKioskPage() {
     type?: string;
     previewUrl?: string;
   } | null>(null);
+
+  // Live Document Preview State (Screen 3 & Fullscreen Modal)
+  const [selectedPreviewPage, setSelectedPreviewPage] = useState<number>(1);
+  const [showFullscreenDocModal, setShowFullscreenDocModal] = useState<boolean>(false);
+  const [docZoomLevel, setDocZoomLevel] = useState<number>(100);
 
   // Print Options State (Screen 4)
   const [copies, setCopies] = useState<number>(1);
@@ -411,14 +416,28 @@ export default function TouchscreenKioskPage() {
                 <GlassPanel className="p-8">
                   <div className="grid grid-cols-12 gap-8 items-center">
                     {/* Featured Document Preview Canvas */}
-                    <div className="col-span-5 flex justify-center">
-                      <div className="w-full max-w-[280px] aspect-[1/1.4] bg-white rounded-control shadow-2xl border border-ink/15 p-6 flex flex-col justify-between relative overflow-hidden group">
+                    <div className="col-span-5 flex flex-col items-center space-y-4">
+                      <div className="w-full max-w-[280px] aspect-[1/1.4] bg-white rounded-control shadow-2xl border border-ink/15 p-4 flex flex-col justify-between relative overflow-hidden group">
                         {uploadedFile.previewUrl ? (
-                          <img
-                            src={uploadedFile.previewUrl}
-                            alt={uploadedFile.name}
-                            className="w-full h-full object-contain rounded-sm"
-                          />
+                          uploadedFile.previewUrl.startsWith('data:image/') || uploadedFile.type?.includes('image') ? (
+                            <img
+                              src={uploadedFile.previewUrl}
+                              alt={uploadedFile.name}
+                              className="w-full h-full object-contain rounded-sm"
+                            />
+                          ) : (
+                            <object
+                              data={uploadedFile.previewUrl}
+                              type="application/pdf"
+                              className="w-full h-full rounded-sm overflow-hidden"
+                            >
+                              <iframe
+                                src={uploadedFile.previewUrl}
+                                title={uploadedFile.name}
+                                className="w-full h-full border-0"
+                              />
+                            </object>
+                          )
                         ) : (
                           <div className="w-full h-full flex flex-col justify-between py-2 text-ink">
                             <div className="space-y-3">
@@ -449,20 +468,35 @@ export default function TouchscreenKioskPage() {
                           </div>
                         )}
                       </div>
+
+                      {/* View Live Fullscreen Document Button */}
+                      <button
+                        onClick={() => setShowFullscreenDocModal(true)}
+                        className="w-full max-w-[280px] glass-2 hover:bg-white/90 border border-ink/15 text-ink font-bold py-2.5 px-4 rounded-control shadow-sm transition flex items-center justify-center gap-2 text-[14px]"
+                      >
+                        <Eye className="w-4 h-4 text-signalCyan" /> View Full Document Live
+                      </button>
                     </div>
 
                     {/* Page Thumbnail Grid */}
                     <div className="col-span-7 space-y-4">
-                      <span className="text-kiosk-label font-bold text-ink block">Page Thumbnails ({uploadedFile.pages})</span>
+                      <div className="flex justify-between items-center">
+                        <span className="text-kiosk-label font-bold text-ink block">Page Thumbnails ({uploadedFile.pages})</span>
+                        <span className="text-kiosk-small font-semibold text-signalCyan">Tap thumbnail to select page</span>
+                      </div>
                       <div className="grid grid-cols-3 gap-4 max-h-[380px] overflow-y-auto pr-2">
-                        {Array.from({ length: Math.min(6, uploadedFile.pages) }).map((_, idx) => (
+                        {Array.from({ length: Math.min(12, uploadedFile.pages) }).map((_, idx) => (
                           <PageThumbnail
                             key={idx}
                             pageNumber={idx + 1}
                             totalPages={uploadedFile.pages}
-                            isSelected={idx === 0}
+                            isSelected={selectedPreviewPage === idx + 1}
                             previewUrl={uploadedFile.previewUrl}
                             fileName={uploadedFile.name}
+                            onClick={() => {
+                              setSelectedPreviewPage(idx + 1);
+                              setShowFullscreenDocModal(true);
+                            }}
                           />
                         ))}
                       </div>
@@ -479,13 +513,22 @@ export default function TouchscreenKioskPage() {
                     Upload a different file
                   </Button>
 
-                  <Button
-                    variant="primary"
-                    size="lg"
-                    onClick={() => setCurrentScreen(4)}
-                  >
-                    Looks good, continue →
-                  </Button>
+                  <div className="flex items-center gap-4">
+                    <Button
+                      variant="ghost"
+                      size="lg"
+                      onClick={() => setShowFullscreenDocModal(true)}
+                    >
+                      <Eye className="w-5 h-5 text-signalCyan" /> Inspect Live Document
+                    </Button>
+                    <Button
+                      variant="primary"
+                      size="lg"
+                      onClick={() => setCurrentScreen(4)}
+                    >
+                      Looks good, continue →
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}
@@ -813,7 +856,138 @@ export default function TouchscreenKioskPage() {
       </div>
 
       {/* GLOBAL KIOSK OVERLAYS */}
-      {/* 1. Inactivity Modal */}
+      {/* 1. Live Document Inspection Modal */}
+      {showFullscreenDocModal && uploadedFile && (
+        <div className="fixed inset-0 z-50 glass-1 backdrop-blur-2xl flex items-center justify-center p-6 bg-slate-950/80">
+          <div className="max-w-5xl w-full h-[90vh] bg-white rounded-control shadow-2xl border border-ink/20 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="px-8 py-5 border-b border-ink/10 flex items-center justify-between bg-bgBase">
+              <div className="flex items-center gap-3 truncate">
+                <FileText className="w-6 h-6 text-signalCyan shrink-0" />
+                <div>
+                  <h3 className="text-kiosk-h2 font-bold text-ink truncate">{uploadedFile.name}</h3>
+                  <span className="text-kiosk-small font-semibold text-ink2">
+                    Page {selectedPreviewPage} of {totalPages} · Live Preview
+                  </span>
+                </div>
+              </div>
+
+              {/* Zoom & Navigation Controls */}
+              <div className="flex items-center gap-3">
+                <div className="flex items-center glass-2 px-3 py-1.5 rounded-control border border-ink/10 gap-2">
+                  <button
+                    onClick={() => setDocZoomLevel((z) => Math.max(50, z - 25))}
+                    className="p-1 text-ink hover:text-signalCyan font-bold"
+                    title="Zoom Out"
+                  >
+                    <ZoomOut className="w-4 h-4" />
+                  </button>
+                  <span className="text-kiosk-small font-mono font-bold text-ink min-w-[45px] text-center">
+                    {docZoomLevel}%
+                  </span>
+                  <button
+                    onClick={() => setDocZoomLevel((z) => Math.min(200, z + 25))}
+                    className="p-1 text-ink hover:text-signalCyan font-bold"
+                    title="Zoom In"
+                  >
+                    <ZoomIn className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    disabled={selectedPreviewPage <= 1}
+                    onClick={() => setSelectedPreviewPage((p) => Math.max(1, p - 1))}
+                    className="glass-2 disabled:opacity-30 p-2 rounded-control text-ink border border-ink/10"
+                  >
+                    <ChevronLeft className="w-5 h-5" />
+                  </button>
+                  <span className="text-kiosk-label font-bold text-ink tabular-nums">
+                    {selectedPreviewPage} / {totalPages}
+                  </span>
+                  <button
+                    disabled={selectedPreviewPage >= totalPages}
+                    onClick={() => setSelectedPreviewPage((p) => Math.min(totalPages, p + 1))}
+                    className="glass-2 disabled:opacity-30 p-2 rounded-control text-ink border border-ink/10"
+                  >
+                    <ChevronRight className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <button
+                  onClick={() => setShowFullscreenDocModal(false)}
+                  className="p-2.5 rounded-full hover:bg-ink/10 text-ink transition ml-2"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body: Document Renderer */}
+            <div className="flex-1 bg-ink/5 p-8 overflow-auto flex items-center justify-center relative">
+              <div
+                className="transition-all duration-200 shadow-2xl rounded bg-white overflow-hidden max-w-full"
+                style={{ transform: `scale(${docZoomLevel / 100})`, transformOrigin: 'center center' }}
+              >
+                {uploadedFile.previewUrl ? (
+                  uploadedFile.previewUrl.startsWith('data:image/') || uploadedFile.type?.includes('image') ? (
+                    <img
+                      src={uploadedFile.previewUrl}
+                      alt={uploadedFile.name}
+                      className="max-h-[70vh] object-contain mx-auto"
+                    />
+                  ) : (
+                    <object
+                      data={uploadedFile.previewUrl}
+                      type="application/pdf"
+                      className="w-[700px] h-[75vh]"
+                    >
+                      <iframe
+                        src={uploadedFile.previewUrl}
+                        title={uploadedFile.name}
+                        className="w-[700px] h-[75vh] border-0"
+                      />
+                    </object>
+                  )
+                ) : (
+                  <div className="w-[600px] h-[75vh] bg-white p-12 flex flex-col justify-between text-ink border border-ink/10">
+                    <div className="space-y-4">
+                      <div className="flex justify-between border-b pb-3">
+                        <span className="font-mono text-sm font-bold">{uploadedFile.name}</span>
+                        <span className="text-xs bg-ink/10 px-2 py-1 font-bold rounded">PAGE {selectedPreviewPage}</span>
+                      </div>
+                      <div className="w-3/4 h-3 bg-ink/20 rounded-pill" />
+                      <div className="w-full h-2.5 bg-ink/10 rounded-pill" />
+                      <div className="w-5/6 h-2.5 bg-ink/10 rounded-pill" />
+                      <div className="w-4/5 h-2.5 bg-ink/10 rounded-pill" />
+                    </div>
+                    <div className="my-auto text-center">
+                      <FileText className="w-24 h-24 text-signalCyan mx-auto opacity-70" />
+                      <p className="font-bold text-ink2 mt-3 text-lg">Live Printed Preview Page {selectedPreviewPage}</p>
+                    </div>
+                    <div className="space-y-2 border-t pt-4">
+                      <div className="w-full h-2 bg-ink/10 rounded-pill" />
+                      <div className="w-2/3 h-2 bg-ink/10 rounded-pill" />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-8 py-4 bg-bgBase border-t border-ink/10 flex items-center justify-between">
+              <span className="text-kiosk-small text-ink2">
+                Tip: Tap thumbnails or use arrow keys to navigate document pages
+              </span>
+              <Button variant="primary" size="md" onClick={() => setShowFullscreenDocModal(false)}>
+                Close Preview
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 2. Inactivity Modal */}
       {showInactivityModal && (
         <div className="fixed inset-0 z-50 glass-1 backdrop-blur-2xl flex items-center justify-center p-8">
           <GlassPanel className="max-w-xl w-full p-10 space-y-8 text-center bg-white/90 shadow-2xl border-2 border-ink">
@@ -833,7 +1007,7 @@ export default function TouchscreenKioskPage() {
         </div>
       )}
 
-      {/* 2. Reconnecting Overlay */}
+      {/* 3. Reconnecting Overlay */}
       {isReconnecting && (
         <div className="fixed inset-0 z-50 glass-1 backdrop-blur-3xl flex items-center justify-center p-8 bg-bgBase/80">
           <div className="text-center space-y-6 max-w-lg">
