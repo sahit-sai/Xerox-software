@@ -29,6 +29,7 @@ class KioskAgent:
         self.toner_pct = 90.0
         self.state = "ok"
         self.current_job_id = None
+        self.http = requests.Session() # Reuse socket & connection pool for high-speed polling
 
         if self.mock_mode:
             logger.info("[MODE] Initializing Agent in MOCK PRINTER MODE")
@@ -52,59 +53,37 @@ class KioskAgent:
             "Content-Type": "application/json"
         }
 
-    def check_hardware_reasons(self):
-        if self.mock_mode:
-            return
-        try:
-            printers = self.cups_conn.getPrinters()
-            printer_info = printers.get(self.printer_name, {})
-            reasons = printer_info.get("printer-state-reasons", [])
-            
-            if "media-empty" in str(reasons) or "media-needed" in str(reasons):
-                self.state = "no_paper"
-                self.paper_sheets = 0
-            elif "media-jam" in str(reasons):
-                self.state = "jam"
-            elif printer_info.get("printer-state") == 5: # Stopped / Offline
-                self.state = "offline"
-            else:
-                self.state = "ok"
-        except Exception as e:
-            logger.warning(f"Error checking CUPS printer state: {e}")
-
     def send_heartbeat(self):
-        self.check_hardware_reasons()
         url = f"{self.backend_url}/api/agent/heartbeat"
         payload = {
-            "paper_sheets": self.paper_sheets,
-            "toner_pct": self.toner_pct,
+            "paperSheets": self.paper_sheets,
+            "tonerPct": self.toner_pct,
             "state": self.state
         }
+        body_bytes = json.dumps(payload).encode('utf-8')
         try:
-            body_bytes = json.dumps(payload).encode('utf-8')
-            res = requests.post(url, data=body_bytes, headers=self.make_auth_headers(body_bytes), timeout=15)
-            if res.status_code == 200:
-                logger.info(f"[HEARTBEAT] Sent | State: {self.state} | Paper: {self.paper_sheets}")
+            r = self.http.post(url, data=body_bytes, headers=self.make_auth_headers(body_bytes), timeout=5)
+            if r.status_code == 200:
+                logger.debug(f"Heartbeat OK: {self.paper_sheets} sheets, {self.toner_pct}% toner")
             else:
-                logger.warning(f"[HEARTBEAT] Failed ({res.status_code}): {res.text}")
+                logger.warning(f"Heartbeat failed [{r.status_code}]: {r.text}")
         except Exception as e:
-            logger.error(f"[HEARTBEAT] Connection error: {e}")
+            logger.error(f"Heartbeat connection error: {e}")
 
-    def poll_next_job(self):
-        if self.current_job_id:
-            return
-
+    def poll_next_job(self) -> dict:
         url = f"{self.backend_url}/api/agent/next-job"
         try:
-            res = requests.get(url, headers=self.make_auth_headers(), timeout=15)
-            if res.status_code == 200:
-                data = res.json()
+            r = self.http.get(url, headers=self.make_auth_headers(b""), timeout=10)
+            if r.status_code == 200:
+                data = r.json()
                 job = data.get("job")
                 if job:
-                    logger.info(f"[JOB ENQUEUED] Token #{job['token']} | Job ID: {job['id']} | File: {job['fileName']}")
-                    self.process_job(job)
+                    logger.info(f"[JOB ENQUEUED] Token #{job.get('token')} | Job ID: {job['id']} | File: {job.get('fileName')}")
+                    return job
+            return None
         except Exception as e:
             logger.error(f"[POLL NEXT JOB] Error: {e}")
+            return None
 
     def process_job(self, job: dict):
         self.current_job_id = job["id"]
@@ -114,10 +93,10 @@ class KioskAgent:
 
         def progress_callback(printed_sheets: int):
             prog_url = f"{self.backend_url}/api/agent/progress"
-            payload = {"jobId": job_id, "printedSheets": printedSheets}
+            payload = {"jobId": job_id, "printedSheets": printed_sheets}
             b = json.dumps(payload).encode('utf-8')
             try:
-                requests.post(prog_url, data=b, headers=self.make_auth_headers(b), timeout=10)
+                self.http.post(prog_url, data=b, headers=self.make_auth_headers(b), timeout=10)
             except Exception as ex:
                 logger.warning(f"Progress update error: {ex}")
 
@@ -138,7 +117,7 @@ class KioskAgent:
             try:
                 download_url = job.get("downloadUrl")
                 if download_url:
-                    r = requests.get(download_url, timeout=30)
+                    r = self.http.get(download_url, timeout=30)
                     with open(tmp_file_path, 'wb') as f:
                         f.write(r.content)
 
@@ -163,47 +142,66 @@ class KioskAgent:
 
             except Exception as e:
                 logger.error(f"CUPS print execution failed: {e}")
-                self.fail_job(job_id, f"CUPS error: {str(e)}")
+                self.fail_job(job_id, f"Hardware CUPS print error: {e}")
             finally:
-                # Always delete local temp file
                 if os.path.exists(tmp_file_path):
                     try:
                         os.remove(tmp_file_path)
-                    except OSError:
+                    except Exception:
                         pass
-
-        self.current_job_id = None
 
     def complete_job(self, job_id: str):
         url = f"{self.backend_url}/api/agent/complete"
         payload = {"jobId": job_id}
         b = json.dumps(payload).encode('utf-8')
         try:
-            requests.post(url, data=b, headers=self.make_auth_headers(b), timeout=15)
-            logger.info(f"[JOB DONE] Job {job_id} marked completed.")
+            r = self.http.post(url, data=b, headers=self.make_auth_headers(b), timeout=10)
+            if r.status_code == 200:
+                logger.info(f"[JOB COMPLETE] Job {job_id} successfully printed and marked done")
+            else:
+                logger.warning(f"Complete failed [{r.status_code}]: {r.text}")
         except Exception as e:
-            logger.error(f"Complete job error: {e}")
+            logger.error(f"Complete call error: {e}")
+        finally:
+            self.current_job_id = None
 
     def fail_job(self, job_id: str, reason: str):
         url = f"{self.backend_url}/api/agent/fail"
         payload = {"jobId": job_id, "failReason": reason}
         b = json.dumps(payload).encode('utf-8')
         try:
-            requests.post(url, data=b, headers=self.make_auth_headers(b), timeout=15)
-            logger.error(f"[JOB FAILED] Job {job_id} failed: {reason}")
+            r = self.http.post(url, data=b, headers=self.make_auth_headers(b), timeout=10)
+            if r.status_code == 200:
+                logger.error(f"[JOB FAILED] Job {job_id} failed: {reason}")
+            else:
+                logger.warning(f"Fail report failed [{r.status_code}]: {r.text}")
         except Exception as e:
-            logger.error(f"Fail job error: {e}")
+            logger.error(f"Fail report call error: {e}")
+        finally:
+            self.current_job_id = None
 
     def run(self):
-        logger.info(f"PrintQ Agent started for kiosk '{self.kiosk_code}'")
-        last_hb = 0
+        logger.info(f"PrintQ Kiosk Daemon started for Kiosk: {self.kiosk_code}")
+        last_heartbeat = 0
+
         while True:
-            now = time.time()
-            if now - last_hb >= HEARTBEAT_INTERVAL_SEC:
-                self.send_heartbeat()
-                last_hb = now
-            self.poll_next_job()
-            time.sleep(POLL_INTERVAL_SEC)
+            try:
+                now = time.time()
+                if now - last_heartbeat >= HEARTBEAT_INTERVAL_SEC:
+                    self.send_heartbeat()
+                    last_heartbeat = now
+
+                job = self.poll_next_job()
+                if job:
+                    self.process_job(job)
+                else:
+                    time.sleep(POLL_INTERVAL_SEC)
+            except KeyboardInterrupt:
+                logger.info("Agent shutting down cleanly...")
+                break
+            except Exception as e:
+                logger.error(f"Unexpected main loop error: {e}")
+                time.sleep(3)
 
 if __name__ == "__main__":
     agent = KioskAgent()

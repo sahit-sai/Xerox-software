@@ -1,181 +1,179 @@
 import crypto from 'crypto';
-import { supabaseAdmin } from './supabase';
-import { KioskSession, SessionState } from '@printq/shared';
+import { supabaseAdmin, isSupabaseConfigured } from './supabase';
 
-// Secret key for HMAC signature verification across serverless lambda instances
-const SESSION_SECRET = process.env.RAZORPAY_KEY_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || 'printq-cmyk-secret-key-2026';
+export type SessionState = 'qr_shown' | 'phone_connected' | 'file_ready' | 'paid' | 'expired';
 
-// Memory fallback store for local dev & offline testing
-const memorySessions = new Map<string, any>();
-const memoryShortCodes = new Map<string, string>(); // short_code -> token_hash
-
-export function signSessionToken(kioskId: string, timestamp: number, nonce: string): string {
-  const payloadStr = `${kioskId}.${timestamp}.${nonce}`;
-  const hmacSig = crypto.createHmac('sha256', SESSION_SECRET).update(payloadStr).digest('hex').substring(0, 16);
-  return `${Buffer.from(payloadStr).toString('base64url')}.${hmacSig}`;
+export interface KioskSession {
+  id: string;
+  kiosk_id: string;
+  token_hash: string;
+  short_code: string;
+  state: SessionState;
+  claimed_at?: string;
+  expires_at: string;
+  phone_device_id?: string;
+  created_at: string;
+  updated_at: string;
+  kiosks?: {
+    name: string;
+    code: string;
+  };
+  file?: {
+    name: string;
+    path: string;
+    pages: number;
+    size: number;
+    type?: string;
+    previewUrl?: string;
+    buffer?: Buffer;
+  };
 }
 
-export function verifyAndParseSessionToken(rawToken: string): { valid: boolean; expired?: boolean; kioskId?: string; timestamp?: number } {
+// In-memory fallback map for environments without configured Supabase or local testing
+const memorySessions = new Map<string, KioskSession>();
+
+const SESSION_SIGNING_SECRET = process.env.SESSION_SIGNING_SECRET || 'printq-production-secret-session-salt-2026';
+
+/**
+ * Creates a stateless signed session token containing kioskCode, timestamp, and salt.
+ * Allows instant verification on any serverless lambda without shared in-memory state.
+ */
+export function generateSignedSessionToken(kioskId: string, kioskCode: string): string {
+  const ts = Date.now().toString(36);
+  const salt = crypto.randomBytes(6).toString('hex');
+  const payload = `${kioskId}.${kioskCode}.${ts}.${salt}`;
+  const sig = crypto.createHmac('sha256', SESSION_SIGNING_SECRET).update(payload).digest('hex').substring(0, 16);
+  return `${payload}.${sig}`;
+}
+
+/**
+ * Verifies if a session token was signed by our system and hasn't expired (max 15 mins).
+ */
+export function verifyAndParseSessionToken(token: string): { valid: boolean; kioskId?: string; kioskCode?: string; expired?: boolean } {
   try {
-    const parts = rawToken.split('.');
-    if (parts.length !== 2) return { valid: false };
-    const payloadStr = Buffer.from(parts[0], 'base64url').toString('utf8');
-    const hmacSig = parts[1];
+    const parts = token.split('.');
+    if (parts.length !== 5) return { valid: false };
 
-    const [kioskId, timestampStr, nonce] = payloadStr.split('.');
-    const timestamp = parseInt(timestampStr, 10);
-    if (isNaN(timestamp)) return { valid: false };
+    const [kioskId, kioskCode, tsStr, salt, sig] = parts;
+    const payload = `${kioskId}.${kioskCode}.${tsStr}.${salt}`;
+    const expectedSig = crypto.createHmac('sha256', SESSION_SIGNING_SECRET).update(payload).digest('hex').substring(0, 16);
 
-    const expectedHmac = crypto.createHmac('sha256', SESSION_SECRET).update(payloadStr).digest('hex').substring(0, 16);
-    if (hmacSig !== expectedHmac) return { valid: false };
-
-    const now = Date.now();
-    // 90 seconds lifetime check for unclaimed QR code
-    if (now - timestamp > 90 * 1000 || timestamp > now + 15 * 1000) {
-      return { valid: false, expired: true, kioskId, timestamp };
+    if (sig !== expectedSig) {
+      return { valid: false };
     }
 
-    return { valid: true, expired: false, kioskId, timestamp };
-  } catch (err) {
+    const createdTime = parseInt(tsStr, 36);
+    const fifteenMinutes = 15 * 60 * 1000;
+    if (Date.now() - createdTime > fifteenMinutes) {
+      return { valid: false, expired: true };
+    }
+
+    return { valid: true, kioskId, kioskCode };
+  } catch (e) {
     return { valid: false };
   }
 }
 
-export function generateTokenAndHash(kioskId: string = 'VISHNU01'): { rawToken: string; tokenHash: string; shortCode: string } {
-  const now = Date.now();
-  const nonce = crypto.randomBytes(8).toString('hex');
-  const rawToken = signSessionToken(kioskId, now, nonce);
-  const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
-
-  // Generate 6-char uppercase alphanumeric backup code e.g. K7P-2QX
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let c1 = '', c2 = '';
-  for (let i = 0; i < 3; i++) {
-    c1 += chars.charAt(Math.floor(Math.random() * chars.length));
-    c2 += chars.charAt(Math.floor(Math.random() * chars.length));
+/**
+ * Generates an ambiguous-free 6-character backup code (e.g. 7K4M2P)
+ */
+export function generateShortCode(): string {
+  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  let result = '';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
   }
-  const shortCode = `${c1}-${c2}`;
-
-  return { rawToken, tokenHash, shortCode };
+  return result;
 }
 
-export async function getOrCreateActiveSession(kioskId: string) {
-  const now = new Date();
-  const nowIso = now.toISOString();
+export async function createKioskSession(kioskId: string, kioskCode: string) {
+  const rawToken = generateSignedSessionToken(kioskId, kioskCode);
+  const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+  const shortCode = generateShortCode();
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 minutes
 
-  // 1. Check memory store
-  const allSessions = Array.from(memorySessions.values());
-  for (const sess of allSessions) {
-    if (sess.kiosk_id === kioskId && sess.state === 'qr_shown' && new Date(sess.expires_at) > now) {
-      return { session: sess, rawToken: sess.rawToken, shortCode: sess.short_code, isNew: false };
-    }
-  }
-
-  // 2. Try DB lookup
-  try {
-    await supabaseAdmin
-      .from('sessions')
-      .update({ state: 'expired', updated_at: nowIso })
-      .eq('kiosk_id', kioskId)
-      .in('state', ['qr_shown', 'phone_connected'])
-      .lt('expires_at', nowIso);
-
-    const { data: existingSession } = await supabaseAdmin
-      .from('sessions')
-      .select('*')
-      .eq('kiosk_id', kioskId)
-      .eq('state', 'qr_shown')
-      .gt('expires_at', nowIso)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
-
-    if (existingSession) {
-      return { session: existingSession, isNew: false };
-    }
-  } catch (e) {
-    // DB bypass
-  }
-
-  // 3. Create new signed active session (90 second lifetime)
-  const { rawToken, tokenHash, shortCode } = generateTokenAndHash(kioskId);
-  const expiresAt = new Date(Date.now() + 90 * 1000).toISOString();
-
-  const newSessionData: any = {
+  // Primary: Always seed in-memory session for instant zero-latency local lookups
+  const localSession: KioskSession = {
     id: crypto.randomUUID(),
     kiosk_id: kioskId,
     token_hash: tokenHash,
     short_code: shortCode,
-    state: 'qr_shown' as SessionState,
-    phone_device_id: null,
-    created_at: nowIso,
+    state: 'qr_shown',
     expires_at: expiresAt,
-    claimed_at: null,
-    job_id: null,
-    updated_at: nowIso,
-    rawToken,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    kiosks: {
+      name: 'Vishnu College Library',
+      code: kioskCode,
+    },
   };
+  memorySessions.set(tokenHash, localSession);
+  memorySessions.set(rawToken, localSession);
 
-  try {
-    const { data: createdSession } = await supabaseAdmin
-      .from('sessions')
-      .insert([{
-        kiosk_id: kioskId,
-        token_hash: tokenHash,
-        short_code: shortCode,
-        state: 'qr_shown',
-        created_at: nowIso,
-        expires_at: expiresAt,
-        updated_at: nowIso,
-      }])
-      .select('*')
-      .single();
+  // Non-blocking async background store in Supabase if configured (0ms latency for UI)
+  if (isSupabaseConfigured) {
+    supabaseAdmin.from('sessions').insert({
+      id: localSession.id,
+      kiosk_id: kioskId,
+      token_hash: tokenHash,
+      short_code: shortCode,
+      state: 'qr_shown',
+      expires_at: expiresAt,
+    }).then(() => {}, (e) => console.warn('Supabase session insert notice:', e));
+  }
 
-    if (createdSession) {
-      memorySessions.set(tokenHash, createdSession);
-      memoryShortCodes.set(shortCode, tokenHash);
-      return { session: createdSession, rawToken, shortCode, isNew: true };
-    }
-  } catch (err) {}
+  return {
+    rawToken,
+    shortCode,
+    expiresAt,
+    session: localSession,
+  };
+}
 
-  // Save to in-memory maps
-  memorySessions.set(tokenHash, newSessionData);
-  if (rawToken) memorySessions.set(rawToken, newSessionData);
-  memoryShortCodes.set(shortCode, tokenHash);
-
-  return { session: newSessionData, rawToken, shortCode, isNew: true };
+export async function getOrCreateActiveSession(kioskId: string, kioskCode: string = 'VISHNU01') {
+  return createKioskSession(kioskId, kioskCode);
 }
 
 export async function claimSessionByToken(tokenOrHash: string, deviceId: string) {
   const calculatedHash = crypto.createHash('sha256').update(tokenOrHash).digest('hex');
-  const now = new Date();
-  const nowIso = now.toISOString();
+  const nowIso = new Date().toISOString();
   const tenMinLaterIso = new Date(Date.now() + 10 * 60 * 1000).toISOString();
 
-  // 1. Check memory map first
-  const memSession = memorySessions.get(calculatedHash) || memorySessions.get(tokenOrHash);
-  if (memSession) {
-    if (memSession.state !== 'qr_shown') {
+  // 1. Direct In-Memory lookup
+  let existing = memorySessions.get(calculatedHash) || memorySessions.get(tokenOrHash);
+  if (existing) {
+    if (existing.state !== 'qr_shown') {
       return { success: false, reason: 'already_claimed' };
     }
-    if (new Date(memSession.expires_at) <= now) {
+    if (new Date(existing.expires_at) < new Date()) {
       return { success: false, reason: 'expired' };
     }
 
-    memSession.state = 'phone_connected';
-    memSession.claimed_at = nowIso;
-    memSession.expires_at = tenMinLaterIso;
-    memSession.phone_device_id = deviceId;
-    memSession.updated_at = nowIso;
-    memSession.kiosks = {
-      name: 'Vishnu College Library',
-      code: memSession.kiosk_id || 'VISHNU01',
-    };
+    existing.state = 'phone_connected';
+    existing.claimed_at = nowIso;
+    existing.expires_at = tenMinLaterIso;
+    existing.phone_device_id = deviceId;
+    existing.updated_at = nowIso;
 
-    memorySessions.set(calculatedHash, memSession);
-    memorySessions.set(tokenOrHash, memSession);
+    memorySessions.set(calculatedHash, existing);
+    memorySessions.set(tokenOrHash, existing);
 
-    return { success: true, session: memSession };
+    // Sync to Supabase in background
+    if (isSupabaseConfigured) {
+      supabaseAdmin
+        .from('sessions')
+        .update({
+          state: 'phone_connected',
+          claimed_at: nowIso,
+          expires_at: tenMinLaterIso,
+          phone_device_id: deviceId,
+          updated_at: nowIso,
+        })
+        .or(`token_hash.eq.${calculatedHash},token_hash.eq.${tokenOrHash}`)
+        .then(() => {}, () => {});
+    }
+
+    return { success: true, session: existing };
   }
 
   // 2. Stateless HMAC Signature Verification across Vercel Lambda instances
@@ -243,7 +241,7 @@ export function getSessionStatus(tokenOrHash: string) {
   return { success: false, session: null };
 }
 
-export function updateSessionFile(tokenOrHash: string, fileInfo: { name: string; pages: number; path: string; size: number; type?: string; previewUrl?: string }) {
+export function updateSessionFile(tokenOrHash: string, fileInfo: { name: string; pages: number; path: string; size: number; type?: string; previewUrl?: string; buffer?: Buffer }) {
   const calculatedHash = crypto.createHash('sha256').update(tokenOrHash).digest('hex');
   let sess = memorySessions.get(calculatedHash) || memorySessions.get(tokenOrHash);
 
@@ -252,7 +250,11 @@ export function updateSessionFile(tokenOrHash: string, fileInfo: { name: string;
       id: crypto.randomUUID(),
       kiosk_id: 'VISHNU01',
       token_hash: calculatedHash,
+      short_code: 'STAT-01',
+      expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+      created_at: new Date().toISOString(),
       state: 'file_ready',
+      updated_at: new Date().toISOString(),
     };
   }
 
@@ -274,7 +276,7 @@ export function updateSessionState(tokenOrHash: string, newState: SessionState) 
     sess.updated_at = new Date().toISOString();
     memorySessions.set(calculatedHash, sess);
     memorySessions.set(tokenOrHash, sess);
+    return sess;
   }
-  return sess;
+  return null;
 }
-

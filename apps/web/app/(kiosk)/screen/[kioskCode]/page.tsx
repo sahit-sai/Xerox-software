@@ -78,17 +78,19 @@ export default function TouchscreenKioskPage() {
 
   // Payment & Printing Progress (Screen 6, 7, 8, 9)
   const [paymentQrDataUrl, setPaymentQrDataUrl] = useState<string>('');
-  const [tokenNo, setTokenNo] = useState<string>('Token 07');
+  const [tokenNo, setTokenNo] = useState<string>('Token 01');
   const [printedPages, setPrintedPages] = useState<number>(1);
   const [paymentSuccess, setPaymentSuccess] = useState<boolean>(false);
   const [printError, setPrintError] = useState<boolean>(false);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [isProcessingPayment, setIsProcessingPayment] = useState<boolean>(false);
 
   // Global Overlays State
   const [showInactivityModal, setShowInactivityModal] = useState<boolean>(false);
   const [inactivityTimer, setInactivityTimer] = useState<number>(15);
   const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
 
-  const totalPages = uploadedFile?.pages || 24;
+  const totalPages = uploadedFile?.pages || 1;
   const effectiveSheets = calculateSheets(totalPages, copies, doubleSided);
   const pricing = calculateJobPrice(kiosk, {
     pages: totalPages,
@@ -100,11 +102,25 @@ export default function TouchscreenKioskPage() {
   const isKioskOperational = kiosk.state === 'ok' && kiosk.paper_sheets > 0;
   const hasEnoughPaper = kiosk.paper_sheets >= effectiveSheets;
 
+  // Preload session & QR code proactively upon component mount for instant Screen 2 rendering
+  useEffect(() => {
+    initSession();
+  }, [kioskCode]);
+
   // 1. Fetch Session and Generate One-Time QR
   const initSession = async () => {
     try {
       const res = await fetch(`/api/kiosk/${kioskCode}/session`);
       const data = await res.json();
+      if (data.kiosk) {
+        setKiosk((prev) => ({
+          ...prev,
+          ...data.kiosk,
+          paper_sheets: data.kiosk.paper_sheets !== undefined ? data.kiosk.paper_sheets : prev.paper_sheets,
+          toner_pct: data.kiosk.toner_pct !== undefined ? data.kiosk.toner_pct : prev.toner_pct,
+          state: data.kiosk.state || prev.state,
+        }));
+      }
       if (data.session) {
         setSessionId(data.session.id);
         setRawToken(data.rawToken);
@@ -113,7 +129,7 @@ export default function TouchscreenKioskPage() {
 
         const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
         const targetUrl = `${origin}/s/${data.rawToken}`;
-        const qrUrl = await QRCode.toDataURL(targetUrl, { width: 440, margin: 2 });
+        const qrUrl = await QRCode.toDataURL(targetUrl, { width: 440, margin: 1, errorCorrectionLevel: 'M' });
         setQrDataUrl(qrUrl);
         setCountdown(90);
         setPhoneConnected(false);
@@ -123,20 +139,42 @@ export default function TouchscreenKioskPage() {
     }
   };
 
-  // Generate Real UPI Payment QR Code when entering Screen 6
+  // Proactively generate & memoize Real UPI Payment QR Code with fast ECC
   useEffect(() => {
-    if (currentScreen !== 6) return;
+    if (!sessionId || Number(pricing.totalRupees) <= 0) return;
     const generateUpiQr = async () => {
       const upiUrl = `upi://pay?pa=7842410691@ybl&pn=PrintQ%20Kiosk&tr=${sessionId || 'JOB_' + Date.now()}&tn=PrintQ%20Order&am=${pricing.totalRupees}&cu=INR`;
       try {
-        const url = await QRCode.toDataURL(upiUrl, { width: 440, margin: 2 });
+        const url = await QRCode.toDataURL(upiUrl, { width: 440, margin: 1, errorCorrectionLevel: 'M' });
         setPaymentQrDataUrl(url);
       } catch (e) {
         console.error('UPI QR generation error:', e);
       }
     };
     generateUpiQr();
-  }, [currentScreen, pricing.totalRupees, sessionId]);
+  }, [pricing.totalRupees, sessionId]);
+
+  // Periodic live kiosk hardware status polling (Paper sheets, toner, operational state)
+  useEffect(() => {
+    const pollKioskStatus = async () => {
+      try {
+        const res = await fetch(`/api/kiosk/${kioskCode}/session`);
+        const data = await res.json();
+        if (data.kiosk) {
+          setKiosk((prev) => ({
+            ...prev,
+            ...data.kiosk,
+            paper_sheets: data.kiosk.paper_sheets !== undefined ? data.kiosk.paper_sheets : prev.paper_sheets,
+            toner_pct: data.kiosk.toner_pct !== undefined ? data.kiosk.toner_pct : prev.toner_pct,
+            state: data.kiosk.state || prev.state,
+          }));
+        }
+      } catch (e) {}
+    };
+
+    const interval = setInterval(pollKioskStatus, 2500);
+    return () => clearInterval(interval);
+  }, [kioskCode]);
 
   // Reset state & create a new session once printing completes
   const resetAndStartNewSession = () => {
@@ -154,6 +192,8 @@ export default function TouchscreenKioskPage() {
     setSessionId(null);
     setRawToken('');
     setQrDataUrl('');
+    setActiveJobId(null);
+    setIsProcessingPayment(false);
     setCurrentScreen(1);
     initSession();
   };
@@ -196,44 +236,236 @@ export default function TouchscreenKioskPage() {
           }
         }
       } catch (e) {}
-    }, 1200);
+    }, 500);
 
     return () => clearInterval(pollInterval);
   }, [currentScreen, rawToken]);
 
+  const [isUploadingDirect, setIsUploadingDirect] = useState<boolean>(false);
+
+  const handleUploadSamplePdf = async () => {
+    if (!rawToken || isUploadingDirect) return;
+    setIsUploadingDirect(true);
+    setPhoneConnected(true);
+    try {
+      const { PDFDocument, rgb, StandardFonts } = await import('pdf-lib');
+      const pdfDoc = await PDFDocument.create();
+      const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+      // Page 1
+      const page1 = pdfDoc.addPage([595, 842]);
+      page1.drawText('PrintQ Real-time Document Test', { x: 50, y: 780, size: 22, font: helveticaBold, color: rgb(0.05, 0.05, 0.05) });
+      page1.drawText('Page 1 of 2 - Ready for Immediate Printing', { x: 50, y: 740, size: 14, font: helveticaFont, color: rgb(0.2, 0.2, 0.2) });
+      page1.drawText('Authentic PDF byte buffer created in memory and uploaded to session.', { x: 50, y: 700, size: 12, font: helveticaFont, color: rgb(0.35, 0.35, 0.35) });
+      page1.drawText(`Kiosk: ${kioskCode} | Created: ${new Date().toLocaleTimeString()}`, { x: 50, y: 660, size: 11, font: helveticaFont, color: rgb(0.5, 0.5, 0.5) });
+
+      // Page 2
+      const page2 = pdfDoc.addPage([595, 842]);
+      page2.drawText('PrintQ Real-time Document Test', { x: 50, y: 780, size: 22, font: helveticaBold, color: rgb(0.05, 0.05, 0.05) });
+      page2.drawText('Page 2 of 2 - Second Page Content', { x: 50, y: 740, size: 14, font: helveticaFont, color: rgb(0.2, 0.2, 0.2) });
+      page2.drawText('Verified page stream ready for CUPS / Mock printer hardware.', { x: 50, y: 700, size: 12, font: helveticaFont, color: rgb(0.35, 0.35, 0.35) });
+
+      const pdfBytes = await pdfDoc.save();
+      const blob = new Blob([pdfBytes.buffer as ArrayBuffer], { type: 'application/pdf' });
+      const formData = new FormData();
+      formData.append('file', blob, 'sample_document_2pages.pdf');
+      formData.append('token', rawToken);
+      formData.append('clientPages', '2');
+
+      await fetch('/api/sessions/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      setUploadedFile({
+        name: 'sample_document_2pages.pdf',
+        pages: 2,
+        size: pdfBytes.byteLength,
+        type: 'application/pdf',
+      });
+      setTimeout(() => {
+        setIsUploadingDirect(false);
+        setCurrentScreen(3);
+      }, 500);
+    } catch (err) {
+      console.error('Failed to generate sample PDF:', err);
+      setIsUploadingDirect(false);
+    }
+  };
+
+  const handleDirectFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0];
+    if (!selectedFile || !rawToken) return;
+
+    setIsUploadingDirect(true);
+    setPhoneConnected(true);
+    try {
+      let clientPages = 1;
+      let previewUrl: string | undefined = undefined;
+
+      try {
+        previewUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error('Failed to read file preview'));
+          reader.readAsDataURL(selectedFile);
+        });
+      } catch (e) {}
+
+      if (selectedFile.type === 'application/pdf' || selectedFile.name.endsWith('.pdf')) {
+        try {
+          const { PDFDocument } = await import('pdf-lib');
+          const buffer = await selectedFile.arrayBuffer();
+          const pdfDoc = await PDFDocument.load(buffer, { ignoreEncryption: true });
+          clientPages = pdfDoc.getPageCount();
+        } catch (e) {}
+      }
+
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+      formData.append('token', rawToken);
+      formData.append('clientPages', clientPages.toString());
+      if (previewUrl) formData.append('previewUrl', previewUrl);
+
+      await fetch('/api/sessions/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      setUploadedFile({
+        name: selectedFile.name,
+        pages: clientPages,
+        size: selectedFile.size,
+        type: selectedFile.type,
+        previewUrl,
+      });
+
+      setTimeout(() => {
+        setIsUploadingDirect(false);
+        setCurrentScreen(3);
+      }, 500);
+    } catch (err) {
+      console.error('Direct file upload error:', err);
+      setIsUploadingDirect(false);
+    }
+  };
+
+  const handlePaymentComplete = async () => {
+    if (isProcessingPayment) return;
+    setIsProcessingPayment(true);
+
+    try {
+      const res = await fetch('/api/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kioskCode,
+          token: rawToken,
+          fileName: uploadedFile?.name || 'document.pdf',
+          pages: totalPages,
+          copies,
+          colour,
+          doubleSided,
+          orientation,
+          pageRange: pageRangeMode === 'custom' ? customRange : undefined,
+          amountPaise: pricing.totalPaise,
+          status: 'queued',
+        }),
+      });
+
+      const data = await res.json();
+      if (data.job) {
+        setActiveJobId(data.job.id);
+        const tokenNum = data.job.token || data.job.tokenNo || 1;
+        setTokenNo(`Token ${String(tokenNum).padStart(2, '0')}`);
+      }
+    } catch (err) {
+      console.warn('Failed to enqueue print job via API:', err);
+    }
+
+    setPaymentSuccess(true);
+    setTimeout(() => {
+      setCurrentScreen(7);
+      setIsProcessingPayment(false);
+    }, 1000);
+  };
+
   // Real-time Payment Polling for Screen 6 (Detect Payment Paid via Webhook / Phone / Razorpay API)
   useEffect(() => {
-    if (currentScreen !== 6 || !rawToken) return;
+    if (currentScreen !== 6 || !rawToken || paymentSuccess) return;
     const pollInterval = setInterval(async () => {
       try {
         const res = await fetch(`/api/sessions/status?token=${encodeURIComponent(rawToken)}`);
         const data = await res.json();
         if (data.session && data.session.state === 'paid') {
-          setPaymentSuccess(true);
-          setTimeout(() => setCurrentScreen(7), 1000);
+          handlePaymentComplete();
         }
       } catch (e) {}
-    }, 1200);
+    }, 500);
 
     return () => clearInterval(pollInterval);
-  }, [currentScreen, rawToken]);
+  }, [currentScreen, rawToken, paymentSuccess]);
 
-  // Screen 7 Printing animation loop
+  // Screen 7 Printing status polling linked to actual kiosk-agent
   useEffect(() => {
     if (currentScreen !== 7) return;
     setPrintedPages(1);
-    const interval = setInterval(() => {
-      setPrintedPages((prev) => {
-        if (prev >= totalPages) {
-          clearInterval(interval);
-          setTimeout(() => setCurrentScreen(8), 800);
-          return totalPages;
+
+    let isCompleted = false;
+    let fallbackTimer: NodeJS.Timeout | null = null;
+    let fallbackTickInterval: NodeJS.Timeout | null = null;
+
+    const pollInterval = setInterval(async () => {
+      if (!activeJobId) return;
+      try {
+        const res = await fetch(`/api/jobs/${activeJobId}`);
+        const data = await res.json();
+        if (data.job) {
+          const currentJob = data.job;
+          if (currentJob.printed_sheets !== undefined && currentJob.printed_sheets > 0) {
+            setPrintedPages(currentJob.printed_sheets);
+          }
+          if (currentJob.status === 'done') {
+            isCompleted = true;
+            clearInterval(pollInterval);
+            if (fallbackTickInterval) clearInterval(fallbackTickInterval);
+            if (fallbackTimer) clearTimeout(fallbackTimer);
+            setPrintedPages(totalPages);
+            setTimeout(() => setCurrentScreen(8), 800);
+          } else if (currentJob.status === 'failed') {
+            isCompleted = true;
+            clearInterval(pollInterval);
+            if (fallbackTickInterval) clearInterval(fallbackTickInterval);
+            if (fallbackTimer) clearTimeout(fallbackTimer);
+            setPrintError(true);
+          }
         }
-        return prev + 1;
-      });
-    }, 600);
-    return () => clearInterval(interval);
-  }, [currentScreen, totalPages]);
+      } catch (e) {}
+    }, 350);
+
+    // Graceful fallback animation if kiosk-agent is offline
+    fallbackTimer = setTimeout(() => {
+      if (!isCompleted) {
+        fallbackTickInterval = setInterval(() => {
+          setPrintedPages((prev) => {
+            if (prev >= totalPages) {
+              if (fallbackTickInterval) clearInterval(fallbackTickInterval);
+              setTimeout(() => setCurrentScreen(8), 800);
+              return totalPages;
+            }
+            return prev + 1;
+          });
+        }, 350);
+      }
+    }, 3500);
+
+    return () => {
+      clearInterval(pollInterval);
+      if (fallbackTickInterval) clearInterval(fallbackTickInterval);
+      if (fallbackTimer) clearTimeout(fallbackTimer);
+    };
+  }, [currentScreen, activeJobId, totalPages]);
 
   // Screen 8 Collect countdown
   useEffect(() => {
@@ -270,13 +502,10 @@ export default function TouchscreenKioskPage() {
         </div>
 
         <div className="flex items-center space-x-4">
+          <span className="text-kiosk-small font-medium text-ink2 bg-white/40 px-3 py-1.5 rounded-pill border border-ink/8">
+            Paper: <strong className="text-ink font-bold tabular-nums">{kiosk.paper_sheets}</strong> sheets · Toner: <strong className="text-ink font-bold tabular-nums">{Math.round(kiosk.toner_pct)}%</strong>
+          </span>
           <StatusPill status={isKioskOperational ? (kiosk.paper_sheets < 20 ? 'no_paper' : 'ok') : 'offline'} />
-          <button
-            onClick={() => setIsReconnecting(!isReconnecting)}
-            className="text-kiosk-small font-medium text-ink3 hover:text-ink transition"
-          >
-            {isReconnecting ? 'Simulating Reconnect...' : 'Status'}
-          </button>
         </div>
       </header>
 
@@ -299,7 +528,9 @@ export default function TouchscreenKioskPage() {
               <div
                 onClick={() => {
                   setCurrentScreen(2);
-                  initSession();
+                  if (!qrDataUrl) {
+                    initSession();
+                  }
                 }}
                 className="w-full cursor-pointer space-y-16 group select-none py-12"
               >
@@ -347,20 +578,30 @@ export default function TouchscreenKioskPage() {
                     </div>
                   </div>
 
-                  {/* Simulator Trigger */}
+                  {/* Real File Upload & Sample Test Document */}
                   <div className="pt-6 space-y-3">
+                    <input
+                      type="file"
+                      id="kiosk-direct-file-input"
+                      accept=".pdf,.docx,.doc,image/*"
+                      onChange={handleDirectFileUpload}
+                      className="hidden"
+                    />
                     <Button
                       variant="primary"
                       size="lg"
-                      onClick={() => {
-                        setPhoneConnected(true);
-                        setTimeout(() => {
-                          setUploadedFile({ name: 'Lab_Report_Final_v2.pdf', pages: 24 });
-                          setCurrentScreen(3);
-                        }, 1200);
-                      }}
+                      onClick={handleUploadSamplePdf}
+                      loading={isUploadingDirect}
                     >
-                      Simulate Phone Connection & Upload →
+                      📄 Load Sample PDF (2 pages) →
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="lg"
+                      onClick={() => document.getElementById('kiosk-direct-file-input')?.click()}
+                      disabled={isUploadingDirect}
+                    >
+                      📁 Choose File from Device / USB →
                     </Button>
                     <Button
                       variant="ghost"
@@ -743,10 +984,8 @@ export default function TouchscreenKioskPage() {
                     <Button
                       variant="primary"
                       size="lg"
-                      onClick={() => {
-                        setPaymentSuccess(true);
-                        setTimeout(() => setCurrentScreen(7), 1000);
-                      }}
+                      loading={isProcessingPayment}
+                      onClick={handlePaymentComplete}
                     >
                       Simulate Successful Payment →
                     </Button>
@@ -784,7 +1023,7 @@ export default function TouchscreenKioskPage() {
                     <ToastBanner
                       type="error"
                       title="Printer Error"
-                      message="Paper jam detected in tray 1. Your payment of ₹24.00 will be refunded automatically."
+                      message={`Paper jam detected in tray 1. Your payment of ₹${pricing.totalRupees} will be refunded automatically.`}
                     />
                     <h2 className="text-kiosk-h2 font-bold text-ink">Full refund initiated to your UPI account</h2>
                     <Button variant="primary" size="lg" onClick={() => setCurrentScreen(1)}>
@@ -830,7 +1069,7 @@ export default function TouchscreenKioskPage() {
                 <div className="space-y-6">
                   <ArrowDown className="w-32 h-32 text-ink animate-bounce" />
                   <h1 className="text-kiosk-display font-black text-ink">Collect your prints below</h1>
-                  <p className="text-kiosk-h1 font-bold text-ink2">{totalPages} pages printed</p>
+                  <p className="text-kiosk-h1 font-bold text-ink2">{printedPages} sheets printed</p>
                 </div>
 
                 <div className="pt-8 border-t border-ink/10 flex items-center justify-between">

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAgentHmac } from '@/lib/agent-auth';
-import { supabaseAdmin } from '@/lib/supabase';
+import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase';
+import { updateJobProgress } from '@/lib/job';
 
 export async function POST(req: NextRequest) {
   try {
@@ -18,10 +19,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing jobId or printedSheets' }, { status: 400 });
     }
 
-    await supabaseAdmin
-      .from('jobs')
-      .update({ printed_sheets: printedSheets })
-      .eq('id', jobId);
+    updateJobProgress(jobId, printedSheets);
+
+    if (isSupabaseConfigured) {
+      await supabaseAdmin
+        .from('jobs')
+        .update({ printed_sheets: printedSheets })
+        .eq('id', jobId);
+    }
 
     return NextResponse.json({ success: true, jobId, printedSheets });
   } catch (error: any) {

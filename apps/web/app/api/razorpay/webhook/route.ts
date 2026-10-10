@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase';
+import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase';
 import { verifyWebhookSignature } from '@/lib/razorpay';
-import { updateSessionState } from '@/lib/session';
+import { updateSessionState, getSessionStatus } from '@/lib/session';
+import { queueJobById, createJobFromSession } from '@/lib/job';
 
 export async function POST(req: NextRequest) {
   try {
@@ -26,10 +27,17 @@ export async function POST(req: NextRequest) {
 
       if (sessionToken) {
         updateSessionState(sessionToken, 'paid');
+        const sessionStatus = getSessionStatus(sessionToken);
+        if (sessionStatus?.session?.file) {
+          createJobFromSession(sessionToken, {
+            kioskId: sessionStatus.session.kiosk_id || 'VISHNU01',
+            amountPaise: paymentEntity.amount || 200,
+          });
+        }
       }
 
-      if (orderId) {
-        // Fetch job associated with orderId
+      if (orderId && isSupabaseConfigured) {
+        // Fetch job associated with orderId in Supabase
         const { data: job } = await supabaseAdmin
           .from('jobs')
           .select('id, kiosk_id, status, token')
@@ -63,12 +71,13 @@ export async function POST(req: NextRequest) {
           console.log(`Payment confirmed for Job ${job.id}! Assigned Token #${nextToken}`);
         }
       }
+
+      return NextResponse.json({ status: 'ok', received: true });
     }
 
-    return NextResponse.json({ status: 'ok', received: true });
+    return NextResponse.json({ status: 'ignored' });
   } catch (error: any) {
-    console.error('Razorpay Webhook Error:', error);
+    console.error('Webhook processing error:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
-

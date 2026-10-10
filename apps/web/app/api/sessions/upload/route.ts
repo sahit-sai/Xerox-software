@@ -90,20 +90,12 @@ export async function POST(req: NextRequest) {
     const fileExt = fileName.split('.').pop() || 'pdf';
     const filePath = `sessions/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
 
-    // Upload to Supabase only if correctly configured and with strict 2.5s timeout guard
+    // Non-blocking background upload to Supabase storage (0ms latency for mobile client)
     if (buffer && isSupabaseConfigured) {
-      try {
-        const uploadPromise = supabaseAdmin.storage.from('print-files').upload(filePath, buffer, {
-          contentType: fileType,
-          upsert: true,
-        });
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Storage upload timeout')), 2500)
-        );
-        await Promise.race([uploadPromise, timeoutPromise]);
-      } catch (e) {
-        console.warn('Storage upload bypass warning:', e);
-      }
+      supabaseAdmin.storage.from('print-files').upload(filePath, buffer, {
+        contentType: fileType,
+        upsert: true,
+      }).then(() => {}, (e) => console.warn('Storage upload background notice:', e));
     }
 
     const fileDetails = {
@@ -113,6 +105,7 @@ export async function POST(req: NextRequest) {
       size: fileSize,
       type: fileType,
       previewUrl,
+      buffer: buffer || undefined,
     };
 
     // Update session state with real file details
@@ -141,7 +134,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         success: true,
-        file: fileDetails,
+        file: {
+          name: fileDetails.name,
+          path: fileDetails.path,
+          pages: fileDetails.pages,
+          size: fileDetails.size,
+          type: fileDetails.type,
+          previewUrl: fileDetails.previewUrl,
+        },
       },
       { headers: corsHeaders }
     );
@@ -153,5 +153,3 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-
-

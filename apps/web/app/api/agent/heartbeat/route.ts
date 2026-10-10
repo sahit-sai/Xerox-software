@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAgentHmac } from '@/lib/agent-auth';
-import { supabaseAdmin } from '@/lib/supabase';
+import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase';
+import { updateKioskHeartbeat } from '@/lib/kiosk';
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,29 +13,41 @@ export async function POST(req: NextRequest) {
     }
 
     const payload = JSON.parse(rawBody || '{}');
-    const { paper_sheets, toner_pct, state } = payload;
+    const paperSheets = payload.paperSheets ?? payload.paper_sheets ?? authResult.kiosk.paper_sheets;
+    const tonerPct = payload.tonerPct ?? payload.toner_pct ?? 90;
+    const state = payload.state || 'ok';
 
     const kioskId = authResult.kiosk.id;
+    const kioskCode = authResult.kiosk.code;
 
-    // Update kiosk heartbeat and stats
-    await supabaseAdmin
-      .from('kiosks')
-      .update({
-        paper_sheets: paper_sheets ?? authResult.kiosk.paper_sheets,
-        toner_pct: toner_pct ?? 100,
-        state: state || 'ok',
-        last_heartbeat: new Date().toISOString(),
-      })
-      .eq('id', kioskId);
+    // 1. Update in-memory real-time kiosk store
+    updateKioskHeartbeat(kioskCode, { paperSheets, tonerPct, state });
+    updateKioskHeartbeat(kioskId, { paperSheets, tonerPct, state });
 
-    // Record heartbeat event
-    await supabaseAdmin.from('kiosk_events').insert([
-      {
-        kiosk_id: kioskId,
-        type: 'heartbeat',
-        payload: { paper_sheets, toner_pct, state },
-      },
-    ]);
+    // 2. Update Supabase if configured
+    if (isSupabaseConfigured) {
+      supabaseAdmin
+        .from('kiosks')
+        .update({
+          paper_sheets: paperSheets,
+          toner_pct: tonerPct,
+          state,
+          last_heartbeat: new Date().toISOString(),
+        })
+        .eq('id', kioskId)
+        .then(() => {}, () => {});
+
+      supabaseAdmin
+        .from('kiosk_events')
+        .insert([
+          {
+            kiosk_id: kioskId,
+            type: 'heartbeat',
+            payload: { paperSheets, tonerPct, state },
+          },
+        ])
+        .then(() => {}, () => {});
+    }
 
     return NextResponse.json({ success: true, timestamp: new Date().toISOString() });
   } catch (error: any) {

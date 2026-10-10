@@ -46,60 +46,45 @@ export default function OwnerDashboardPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  useEffect(() => {
-    // Initial data fetch
-    fetch('/api/owner/kiosks')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.kiosks) {
-          setKiosks(
-            data.kiosks.map((k: any) => ({
-              ...k,
-              earnings_today: k.earnings_today || 1240,
-            }))
-          );
-        }
-      })
-      .catch(() => {});
+  const fetchData = async () => {
+    try {
+      const [kiosksRes, jobsRes] = await Promise.all([
+        fetch('/api/owner/kiosks'),
+        fetch('/api/owner/jobs'),
+      ]);
+      const kiosksData = await kiosksRes.json();
+      if (kiosksData.kiosks) {
+        setKiosks(
+          kiosksData.kiosks.map((k: any) => ({
+            ...k,
+            earnings_today: k.earnings_today || 0,
+          }))
+        );
+      }
+      const jobsData = await jobsRes.json();
+      if (jobsData.jobs) {
+        setJobs(
+          jobsData.jobs.map((j: any) => ({
+            id: j.id,
+            token: j.token_no || j.token || 1,
+            kiosk_code: j.kiosk_id || 'VISHNU01',
+            customer_phone: j.customer_phone || '+91 78424 10691',
+            file_name: j.file_name || 'document.pdf',
+            pages: j.total_pages || j.pages || 1,
+            sheets: j.sheets || 1,
+            amount_paise: j.amount_paise || 200,
+            status: j.status,
+            created_at: j.created_at,
+          }))
+        );
+      }
+    } catch (e) {}
+  };
 
-    setJobs([
-      {
-        id: 'job-101',
-        token: 7,
-        kiosk_code: 'VISHNU01',
-        customer_phone: '+91 98765 43210',
-        file_name: 'Library_Assignment_V1.pdf',
-        pages: 24,
-        sheets: 12,
-        amount_paise: 2400,
-        status: 'queued',
-        created_at: new Date().toISOString(),
-      },
-      {
-        id: 'job-100',
-        token: 6,
-        kiosk_code: 'HOSTELA1',
-        customer_phone: '+91 91234 56789',
-        file_name: 'Resume_2026.pdf',
-        pages: 2,
-        sheets: 1,
-        amount_paise: 400,
-        status: 'done',
-        created_at: new Date(Date.now() - 15 * 60000).toISOString(),
-      },
-      {
-        id: 'job-99',
-        token: 5,
-        kiosk_code: 'DWARAKA1',
-        customer_phone: '+91 99887 76655',
-        file_name: 'Ticket_Booking.pdf',
-        pages: 1,
-        sheets: 1,
-        amount_paise: 200,
-        status: 'failed',
-        created_at: new Date(Date.now() - 45 * 60000).toISOString(),
-      },
-    ]);
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 2000); // Live polling every 2s
+    return () => clearInterval(interval);
   }, []);
 
   const totalEarningsPaise = jobs
@@ -121,10 +106,26 @@ export default function OwnerDashboardPage() {
     return matchesStatus && matchesSearch;
   });
 
-  const handleRefill = (kioskId: string) => {
-    setKiosks((prev) =>
-      prev.map((k) => (k.id === kioskId ? { ...k, paper_sheets: k.paper_capacity, state: 'ok' } : k))
-    );
+  const handleRefill = async (kioskId: string) => {
+    try {
+      await fetch('/api/owner/kiosks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'refill', kioskId }),
+      });
+      fetchData();
+    } catch (e) {}
+  };
+
+  const handleReplaceToner = async (kioskId: string) => {
+    try {
+      await fetch('/api/owner/kiosks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'replace_toner', kioskId }),
+      });
+      fetchData();
+    } catch (e) {}
   };
 
   const handleRefund = async (jobId: string) => {

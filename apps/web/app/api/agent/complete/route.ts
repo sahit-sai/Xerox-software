@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAgentHmac } from '@/lib/agent-auth';
-import { supabaseAdmin } from '@/lib/supabase';
+import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase';
+import { completeJob, getJobById } from '@/lib/job';
 
 export async function POST(req: NextRequest) {
   try {
@@ -18,37 +19,41 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing jobId' }, { status: 400 });
     }
 
-    // Fetch job details to get file path
-    const { data: job } = await supabaseAdmin
-      .from('jobs')
-      .select('id, file_path, sheets, kiosk_id')
-      .eq('id', jobId)
-      .single();
+    // Mark job done in memory
+    completeJob(jobId);
 
-    // Mark job done
-    await supabaseAdmin
-      .from('jobs')
-      .update({
-        status: 'done',
-        done_at: new Date().toISOString(),
-      })
-      .eq('id', jobId);
+    // Fetch job details to get file path if in Supabase
+    if (isSupabaseConfigured) {
+      const { data: job } = await supabaseAdmin
+        .from('jobs')
+        .select('id, file_path, sheets, kiosk_id')
+        .eq('id', jobId)
+        .single();
 
-    // Immediately delete file from storage for privacy compliance
-    if (job?.file_path) {
-      try {
-        await supabaseAdmin.storage.from('print-files').remove([job.file_path]);
-      } catch (err) {
-        console.warn('Storage file deletion error:', err);
+      await supabaseAdmin
+        .from('jobs')
+        .update({
+          status: 'done',
+          done_at: new Date().toISOString(),
+        })
+        .eq('id', jobId);
+
+      // Delete file from storage for privacy compliance
+      if (job?.file_path) {
+        try {
+          await supabaseAdmin.storage.from('print-files').remove([job.file_path]);
+        } catch (err) {
+          console.warn('Storage file deletion error:', err);
+        }
       }
-    }
 
-    // Decrement kiosk paper count
-    if (job?.sheets) {
-      await supabaseAdmin.rpc('decrement_paper_sheets', {
-        k_id: job.kiosk_id,
-        count: job.sheets,
-      });
+      // Decrement kiosk paper count
+      if (job?.sheets) {
+        await supabaseAdmin.rpc('decrement_paper_sheets', {
+          k_id: job.kiosk_id,
+          count: job.sheets,
+        });
+      }
     }
 
     return NextResponse.json({ success: true, jobId, status: 'done' });

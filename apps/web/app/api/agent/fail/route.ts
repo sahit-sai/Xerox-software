@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAgentHmac } from '@/lib/agent-auth';
-import { supabaseAdmin } from '@/lib/supabase';
+import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase';
 import { razorpay } from '@/lib/razorpay';
+import { failJob, getJobById } from '@/lib/job';
 
 export async function POST(req: NextRequest) {
   try {
@@ -21,59 +22,32 @@ export async function POST(req: NextRequest) {
 
     const kioskId = authResult.kiosk.id;
 
-    // Fetch failing job details
-    const { data: job } = await supabaseAdmin
-      .from('jobs')
-      .select('*')
-      .eq('id', jobId)
-      .single();
+    // Fail job in memory
+    const memoryJob = failJob(jobId, failReason || 'Hardware error', printedSheets);
 
-    if (job) {
-      const totalSheets = job.sheets || 1;
-      const unprintedSheets = Math.max(0, totalSheets - printedSheets);
-      const refundPaise = Math.round((unprintedSheets / totalSheets) * job.amount_paise);
-
-      // Trigger Razorpay refund if payment ID exists
-      if (job.razorpay_payment_id && refundPaise > 0) {
-        try {
-          await razorpay.payments.refund(job.razorpay_payment_id, {
-            amount: refundPaise,
-            notes: { reason: failReason || 'Kiosk print failure' },
-          });
-        } catch (err) {
-          console.warn('Razorpay auto-refund API warning:', err);
-        }
-      }
-
-      // Mark current job failed
-      await supabaseAdmin
+    // If Supabase is configured, process refund and sync
+    if (isSupabaseConfigured) {
+      const { data: job } = await supabaseAdmin
         .from('jobs')
-        .update({
-          status: 'failed',
-          fail_reason: failReason || 'Hardware error',
-          refund_paise: refundPaise,
-          printed_sheets: printedSheets,
-        })
-        .eq('id', jobId);
-    }
+        .select('*')
+        .eq('id', jobId)
+        .single();
 
-    // Fail remaining queued jobs for this kiosk with full refunds
-    const { data: queuedJobs } = await supabaseAdmin
-      .from('jobs')
-      .select('*')
-      .eq('kiosk_id', kioskId)
-      .eq('status', 'queued');
+      const targetJob = job || memoryJob;
 
-    if (queuedJobs && queuedJobs.length > 0) {
-      for (const qJob of queuedJobs) {
-        if (qJob.razorpay_payment_id) {
+      if (targetJob) {
+        const totalSheets = targetJob.sheets || 1;
+        const unprintedSheets = Math.max(0, totalSheets - printedSheets);
+        const refundPaise = Math.round((unprintedSheets / totalSheets) * targetJob.amount_paise);
+
+        if (targetJob.razorpay_payment_id && refundPaise > 0) {
           try {
-            await razorpay.payments.refund(qJob.razorpay_payment_id, {
-              amount: qJob.amount_paise,
-              notes: { reason: 'Kiosk printer out of service' },
+            await razorpay.payments.refund(targetJob.razorpay_payment_id, {
+              amount: refundPaise,
+              notes: { reason: failReason || 'Kiosk print failure' },
             });
-          } catch (e) {
-            console.warn(`Refund error for queued job ${qJob.id}:`, e);
+          } catch (err) {
+            console.warn('Razorpay auto-refund API warning:', err);
           }
         }
 
@@ -81,18 +55,18 @@ export async function POST(req: NextRequest) {
           .from('jobs')
           .update({
             status: 'failed',
-            fail_reason: 'Kiosk printer out of service',
-            refund_paise: qJob.amount_paise,
+            fail_reason: failReason || 'Hardware error',
+            refund_paise: refundPaise,
+            printed_sheets: printedSheets,
           })
-          .eq('id', qJob.id);
+          .eq('id', jobId);
       }
-    }
 
-    // Set kiosk state to jam/offline
-    await supabaseAdmin
-      .from('kiosks')
-      .update({ state: 'jam' })
-      .eq('id', kioskId);
+      await supabaseAdmin
+        .from('kiosks')
+        .update({ state: 'jam' })
+        .eq('id', kioskId);
+    }
 
     return NextResponse.json({ success: true, jobId, status: 'failed' });
   } catch (error: any) {
