@@ -28,10 +28,10 @@ const defaultKiosks: KioskRecord[] = [
     name: 'Vishnu College Library',
     location: 'Ground Floor, Central Library, Bhimavaram',
     supports_colour: true,
-    paper_sheets: 450,
+    paper_sheets: 0,
     paper_capacity: 1000,
-    toner_pct: 90.0,
-    state: 'ok',
+    toner_pct: 0.0,
+    state: 'offline',
     rate_bw: 200,
     rate_colour: 1000,
     rate_bw_paise: 200,
@@ -39,7 +39,6 @@ const defaultKiosks: KioskRecord[] = [
     double_discount_pct: 10,
     cost_bw: 50,
     cost_colour: 250,
-    last_heartbeat: new Date().toISOString(),
   },
   {
     id: '22222222-2222-2222-2222-222222222222',
@@ -47,10 +46,10 @@ const defaultKiosks: KioskRecord[] = [
     name: 'Boys Hostel Block A',
     location: 'Entrance Lobby, Hostel Block A',
     supports_colour: false,
-    paper_sheets: 280,
+    paper_sheets: 0,
     paper_capacity: 500,
-    toner_pct: 45.0,
-    state: 'ok',
+    toner_pct: 0.0,
+    state: 'offline',
     rate_bw: 200,
     rate_colour: 0,
     rate_bw_paise: 200,
@@ -58,7 +57,6 @@ const defaultKiosks: KioskRecord[] = [
     double_discount_pct: 5,
     cost_bw: 50,
     cost_colour: 250,
-    last_heartbeat: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
   },
   {
     id: '22222222-2222-2222-2222-222222222223',
@@ -66,10 +64,10 @@ const defaultKiosks: KioskRecord[] = [
     name: 'Dwaraka Nagar Kiosk',
     location: 'Near Bus Stand, Dwaraka Nagar, Vizag',
     supports_colour: true,
-    paper_sheets: 120,
+    paper_sheets: 0,
     paper_capacity: 1000,
-    toner_pct: 68.0,
-    state: 'ok',
+    toner_pct: 0.0,
+    state: 'offline',
     rate_bw: 150,
     rate_colour: 800,
     rate_bw_paise: 150,
@@ -77,7 +75,6 @@ const defaultKiosks: KioskRecord[] = [
     double_discount_pct: 10,
     cost_bw: 40,
     cost_colour: 200,
-    last_heartbeat: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
   },
 ];
 
@@ -90,7 +87,20 @@ defaultKiosks.forEach((k) => {
 });
 
 export function getKioskByCode(codeOrId: string): KioskRecord | null {
-  return memoryKiosks.get(codeOrId) || null;
+  const kiosk = memoryKiosks.get(codeOrId);
+  if (!kiosk) return null;
+
+  // Stale heartbeat detection: if no hardware heartbeat within last 45 seconds, mark offline
+  const isHeartbeatFresh = Boolean(kiosk.last_heartbeat && (Date.now() - new Date(kiosk.last_heartbeat).getTime() < 45000));
+  if (!isHeartbeatFresh) {
+    return {
+      ...kiosk,
+      state: 'offline',
+      paper_sheets: 0,
+      toner_pct: 0,
+    };
+  }
+  return kiosk;
 }
 
 export function getAllKiosks(): KioskRecord[] {

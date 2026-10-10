@@ -40,9 +40,9 @@ export default function TouchscreenKioskPage() {
     code: kioskCode,
     name: 'Vishnu Library Kiosk #1',
     location: 'Ground Floor, Central Library',
-    paper_sheets: 450,
-    toner_pct: 88.5,
-    state: 'ok' as KioskState,
+    paper_sheets: 0,
+    toner_pct: 0,
+    state: 'offline' as KioskState,
     rate_bw_paise: 200,
     rate_colour_paise: 1000,
     supports_colour: true,
@@ -444,26 +444,17 @@ export default function TouchscreenKioskPage() {
       } catch (e) {}
     }, 350);
 
-    // Graceful fallback animation if kiosk-agent is offline
-    fallbackTimer = setTimeout(() => {
+    // Hardware timeout: If physical printer doesn't print within 30s, trigger hardware refund error
+    const hardwareTimeout = setTimeout(() => {
       if (!isCompleted) {
-        fallbackTickInterval = setInterval(() => {
-          setPrintedPages((prev) => {
-            if (prev >= totalPages) {
-              if (fallbackTickInterval) clearInterval(fallbackTickInterval);
-              setTimeout(() => setCurrentScreen(8), 800);
-              return totalPages;
-            }
-            return prev + 1;
-          });
-        }, 350);
+        clearInterval(pollInterval);
+        setPrintError(true);
       }
-    }, 3500);
+    }, 30000);
 
     return () => {
       clearInterval(pollInterval);
-      if (fallbackTickInterval) clearInterval(fallbackTickInterval);
-      if (fallbackTimer) clearTimeout(fallbackTimer);
+      clearTimeout(hardwareTimeout);
     };
   }, [currentScreen, activeJobId, totalPages]);
 
@@ -502,9 +493,15 @@ export default function TouchscreenKioskPage() {
         </div>
 
         <div className="flex items-center space-x-4">
-          <span className="text-kiosk-small font-medium text-ink2 bg-white/40 px-3 py-1.5 rounded-pill border border-ink/8">
-            Paper: <strong className="text-ink font-bold tabular-nums">{kiosk.paper_sheets}</strong> sheets · Toner: <strong className="text-ink font-bold tabular-nums">{Math.round(kiosk.toner_pct)}%</strong>
-          </span>
+          {isKioskOperational ? (
+            <span className="text-kiosk-small font-medium text-ink2 bg-white/40 px-3 py-1.5 rounded-pill border border-ink/8">
+              Paper: <strong className="text-ink font-bold tabular-nums">{kiosk.paper_sheets}</strong> sheets · Toner: <strong className="text-ink font-bold tabular-nums">{Math.round(kiosk.toner_pct)}%</strong>
+            </span>
+          ) : (
+            <span className="text-kiosk-small font-semibold text-rose-600 bg-rose-50 px-3 py-1.5 rounded-pill border border-rose-200">
+              Printer Offline · No Hardware Connected
+            </span>
+          )}
           <StatusPill status={isKioskOperational ? (kiosk.paper_sheets < 20 ? 'no_paper' : 'ok') : 'offline'} />
         </div>
       </header>
@@ -518,7 +515,7 @@ export default function TouchscreenKioskPage() {
             <h1 className="text-kiosk-display text-error font-extrabold tracking-tight">Out of service</h1>
             <p className="text-kiosk-h1 text-ink2 font-semibold">Please use another PrintQ kiosk</p>
             <p className="text-kiosk-body text-ink3 max-w-2xl pt-4">
-              This kiosk is currently offline or paper tray is empty. Operations staff have been notified.
+              This kiosk is currently offline or no printer hardware is detected. Connect printer to resume.
             </p>
           </div>
         ) : (

@@ -25,25 +25,62 @@ class KioskAgent:
         self.device_secret = DEVICE_SECRET
         self.mock_mode = MOCK_PRINTER
         self.printer_name = PRINTER_NAME
-        self.paper_sheets = 450
-        self.toner_pct = 90.0
-        self.state = "ok"
+        self.paper_sheets = 0
+        self.toner_pct = 0.0
+        self.state = "offline"
         self.current_job_id = None
         self.http = requests.Session() # Reuse socket & connection pool for high-speed polling
 
         if self.mock_mode:
-            logger.info("[MODE] Initializing Agent in MOCK PRINTER MODE")
+            logger.info("[MODE] Initializing Agent in MOCK DEV MODE (Simulated Hardware)")
             self.printer = MockPrinter(self.printer_name)
+            self.paper_sheets = 500
+            self.toner_pct = 95.0
+            self.state = "ok"
         else:
-            logger.info(f"[MODE] Initializing CUPS Printing for printer '{self.printer_name}'")
-            try:
-                import cups
+            logger.info(f"[MODE] Initializing REAL CUPS Hardware Detection for printer '{self.printer_name}'")
+            self.check_hardware()
+
+    def check_hardware(self) -> bool:
+        if self.mock_mode:
+            self.state = "ok"
+            return True
+
+        try:
+            import cups
+            if not hasattr(self, 'cups_conn'):
                 self.cups = cups
                 self.cups_conn = cups.Connection()
-            except ImportError:
-                logger.error("pycups package not installed! Falling back to MOCK mode.")
-                self.mock_mode = True
-                self.printer = MockPrinter(self.printer_name)
+            printers = self.cups_conn.getPrinters()
+            if not printers:
+                logger.warning("[HARDWARE STATUS] No physical printers detected in CUPS! Printer is OFFLINE.")
+                self.state = "offline"
+                self.paper_sheets = 0
+                self.toner_pct = 0.0
+                return False
+
+            if self.printer_name in printers:
+                p_info = printers[self.printer_name]
+                self.state = "ok"
+                if self.paper_sheets == 0:
+                    self.paper_sheets = 500
+                    self.toner_pct = 100.0
+                return True
+            else:
+                first_printer = list(printers.keys())[0]
+                logger.info(f"[HARDWARE DETECTED] Using available system printer: '{first_printer}'")
+                self.printer_name = first_printer
+                self.state = "ok"
+                if self.paper_sheets == 0:
+                    self.paper_sheets = 500
+                    self.toner_pct = 100.0
+                return True
+        except Exception as e:
+            logger.error(f"[HARDWARE ERROR] Failed to query CUPS: {e}")
+            self.state = "offline"
+            self.paper_sheets = 0
+            self.toner_pct = 0.0
+            return False
 
     def make_auth_headers(self, body_bytes: bytes = b"") -> dict:
         sig = generate_hmac_signature(body_bytes, self.device_secret)
@@ -54,6 +91,7 @@ class KioskAgent:
         }
 
     def send_heartbeat(self):
+        self.check_hardware()
         url = f"{self.backend_url}/api/agent/heartbeat"
         payload = {
             "paperSheets": self.paper_sheets,
@@ -71,6 +109,8 @@ class KioskAgent:
             logger.error(f"Heartbeat connection error: {e}")
 
     def poll_next_job(self) -> dict:
+        if not self.check_hardware():
+            return None
         url = f"{self.backend_url}/api/agent/next-job"
         try:
             r = self.http.get(url, headers=self.make_auth_headers(b""), timeout=10)
